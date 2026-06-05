@@ -18,7 +18,7 @@ interface VisualizerProps {
 // Scene – all 3D objects that react to data changes
 // ---------------------------------------------------------------------------
 function Scene({ data }: { data: Point[] }) {
-  const pointsRef = useRef<<THREE.Points>(null);
+  const pointsRef = useRef<THREE.Points>(null);
   const [autoRotate, setAutoRotate] = useState(true);
 
   // ---- Compute bounds in a single pass ----

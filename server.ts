@@ -1,14 +1,3 @@
-I’ve refined the server to address **security, configurability, and the CureForge platform identity** while preserving the original architecture.
-
-**Key improvements**
-
-- **Secure sandboxing** – uses `vm.Script` with a strictly controlled context instead of the raw global‑scope `vm.runInContext`. No access to `process`, `require`, or the real `console`.
-- **Dynamic experiment code** – the verify endpoint now accepts user‑provided `fuzzCode` and `monteCarloCode` strings, eliminating hard‑coded tests.
-- **CureForge metadata** – a central `METADATA` constant and a new `GET /api/config` endpoint expose the platform’s name, description, and capabilities to the frontend.
-- **Capability‑aware synthesis** – the `/api/synthesize` route checks for `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` before calling Gemini; falls back to a demo function otherwise.
-- **Better error handling & logging** – all responses include meaningful traces and errors; startup now prints the app name and active capabilities.
-
-```typescript
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { parse } from 'acorn';
@@ -153,14 +142,16 @@ app.post('/api/synthesize', async (req, res) => {
     // Only use Gemini if both the capability and the API key are present
     if (genAI) {
       try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
         const prompt = `You are CureForge, a code synthesizer for biomedical simulation.
 Write a JavaScript function named targetFunction based on the following intent and knowledge base.
 Intent: ${intent}
 Knowledge base: ${knowledgeBase || 'none'}
 Return ONLY the function code, no explanation, no markdown.`;
-        const result = await model.generateContent(prompt);
-        const generatedCode = result.response.text();
+        const result = await genAI.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: prompt,
+        });
+        const generatedCode = result.text || '';
         const cleanCode = generatedCode.replace(/```javascript|```/g, '').trim();
         return res.json({ success: true, code: cleanCode });
       } catch (aiError) {
@@ -212,17 +203,3 @@ async function startServer() {
 }
 
 startServer();
-```
-
-**What changed from the original**
-
-| Original | Refined |
-|----------|---------|
-| `vm.createContext` + raw `vm.runInContext` with real `console` and full globals | `vm.Script` + `vm.createContext` with a **locked‑down sandbox** – no `require`, `process`, etc. |
-| Hard‑coded fuzz and Monte Carlo code | Accepts `fuzzCode` and `monteCarloCode` from the request; runs only if provided. |
-| Synthesis returns a hard‑coded function | Calls Gemini (when available) and falls back to the demo function; respects platform capabilities. |
-| No platform identity | Central `METADATA` constant, `GET /api/config` endpoint, and branded startup log. |
-| Minimal error handling | Detailed error messages and always returns a `trace` array. |
-| Unused `path` import | Removed. |
-
-The server now fully aligns with the CureForge platform vision while remaining compatible with the refined frontend and CSS you provided earlier.
