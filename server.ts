@@ -132,8 +132,21 @@ app.post('/api/verify', async (req, res) => {
   }
 });
 
+app.get('/api/targets', (_req, res) => {
+  const targets = [
+    { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
+    { id: 'ENSG00000157764', symbol: 'BRAF', area: 'Oncology', disease: 'Melanoma', score: 0.95, safety: 'Low', tractability: 'High', infoGain: 0.8 },
+    { id: 'ENSG00000146648', symbol: 'EGFR', area: 'Oncology', disease: 'Lung Cancer', score: 0.92, safety: 'Medium', tractability: 'High', infoGain: 0.75 },
+    { id: 'ENSG00000232810', symbol: 'TNF', area: 'Immunology', disease: 'Rheumatoid Arthritis', score: 0.89, safety: 'Low', tractability: 'High', infoGain: 0.6 },
+    { id: 'ENSG00000160087', symbol: 'SMN1', area: 'Rare Pediatric', disease: 'Spinal Muscular Atrophy', score: 0.98, safety: 'High', tractability: 'Medium', infoGain: 0.99 },
+    { id: 'ENSG00000198691', symbol: 'KREMEN1', area: 'Neglected Tropical', disease: 'Chagas Disease', score: 0.85, safety: 'Medium', tractability: 'Unknown', infoGain: 0.9 },
+    { id: 'ENSG00000142192', symbol: 'APP', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.91, safety: 'Low', tractability: 'Medium', infoGain: 0.88 },
+  ];
+  res.json({ targets });
+});
+
 // ---------------------------------------------------------------------------
-// POST /api/synthesize – code generation via Gemini (if available)
+// POST /api/synthesize – generator + skeptic code generation via Gemini
 // ---------------------------------------------------------------------------
 app.post('/api/synthesize', async (req, res) => {
   try {
@@ -142,26 +155,76 @@ app.post('/api/synthesize', async (req, res) => {
     // Only use Gemini if both the capability and the API key are present
     if (genAI) {
       try {
-        const prompt = `You are CureForge, a code synthesizer for biomedical simulation.
-Write a JavaScript function named targetFunction based on the following intent and knowledge base.
+        const prompt = `You are the Hypothesis Engine for CureForge. Formulate a testable biomedical intervention.
+Generate a structured biomedical hypothesis based on the following context.
 Intent: ${intent}
-Knowledge base: ${knowledgeBase || 'none'}
-Return ONLY the function code, no explanation, no markdown.`;
+Context: ${knowledgeBase}
+
+Return ONLY a JSON object (no markdown block) with this exact structure:
+{
+  "target": "Gene/Protein symbol",
+  "mechanism": "Biological reasoning in 2-3 sentences",
+  "modality": "Small molecule, Biologic, Gene therapy, etc.",
+  "proposed_intervention": "Proposed drug or mechanism of action",
+  "testable_prediction": "Expected biomarker or functional outcome",
+  "confidence": 85,
+  "literature_support": "Brief hypothetical literature/evidence summary"
+}`;
         const result = await genAI.models.generateContent({
           model: 'gemini-3.1-pro-preview',
           contents: prompt,
         });
-        const generatedCode = result.text || '';
-        const cleanCode = generatedCode.replace(/```javascript|```/g, '').trim();
-        return res.json({ success: true, code: cleanCode });
-      } catch (aiError) {
+        const generatedHypothesisText = (result.text || '').replace(/```json|```/g, '').trim();
+        let hypothesis;
+        try {
+          hypothesis = JSON.parse(generatedHypothesisText);
+        } catch(e) {
+          throw new Error('Failed to parse Hypothesis JSON');
+        }
+
+        // --- SECOND CALL: Skeptic AI ---
+        const skepticPrompt = `You are Skeptic.ai, a ruthless peer reviewer. Review this hypothesis for flaws, list them, cite contradictory (mock) papers, and assign a critic_score from 0-100 indicating falsifiability.
+Hypothesis: ${generatedHypothesisText}
+
+Return ONLY a JSON object (no markdown block) with this exact structure:
+{
+  "flaws": ["Flaw 1", "Flaw 2"],
+  "contradictory_papers": ["Citations..."],
+  "critic_score": 75
+}`;
+        const skepticResult = await genAI.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: skepticPrompt,
+        });
+        const skepticText = (skepticResult.text || '').replace(/```json|```/g, '').trim();
+        let skepticObj;
+        try {
+          skepticObj = JSON.parse(skepticText);
+        } catch(e) {
+          throw new Error('Failed to parse Skeptic JSON');
+        }
+
+        // Combine
+        const finalOutput = { ...hypothesis, ...skepticObj };
+
+        return res.json({ success: true, hypothesis: finalOutput });
+      } catch (aiError: any) {
         console.error('Gemini synthesis failed:', aiError);
-        // Fallback to a default function
+        // Fallback to demo
         return res.json({
           success: true,
-          code: `function targetFunction(x, y) {
-  return Math.sin(x) * Math.cos(y) + (x * 0.1);
-}`,
+          hypothesis: {
+            target: "Fallback",
+            mechanism: "Gemini failed to load or parse.",
+            modality: "N/A",
+            proposed_intervention: "N/A",
+            testable_prediction: "N/A",
+            confidence: 0,
+            literature_support: "N/A",
+            flaws: ["AI failed"],
+            contradictory_papers: ["None"],
+            critic_score: 0
+          }
         });
       }
     }
@@ -169,10 +232,18 @@ Return ONLY the function code, no explanation, no markdown.`;
     // Gemini not available – return a static demo
     res.json({
       success: true,
-      code: `function targetFunction(x, y) {
-  // Default demo function (CureForge)
-  return Math.sin(x) * Math.cos(y) + (x * 0.1);
-}`,
+      hypothesis: {
+        target: "EGFR",
+        mechanism: "Inhibition of EGFR tyrosine kinase domain prevents downstream signaling.",
+        modality: "Small molecule",
+        proposed_intervention: "Type I Tyrosine Kinase Inhibitor",
+        testable_prediction: "Decreased phosphorylation of ERK1/2 in tumor biopsy.",
+        confidence: 90,
+        literature_support: "Multiple phase 3 trials in NSCLC demonstrate efficacy.",
+        flaws: ["Acquired resistance via T790M mutation", "Off-target GI toxicity"],
+        contradictory_papers: ["Smith et al. 2025: Early resistance pathways in EGFR+"],
+        critic_score: 65
+      }
     });
   } catch (error) {
     console.error('Synthesis error:', error);

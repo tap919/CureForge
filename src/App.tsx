@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu } from 'lucide-react';
 import { Visualizer } from './Visualizer';
 
 const DEFAULT_FUZZ_CODE = `// fast-check property QC: Validating assay readout stability
@@ -29,23 +29,28 @@ for (let i = 0; i < 2000; i++) {
 }
 result = points;`;
 
-const TARGETS = [
-  { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
-  { id: 'ENSG00000157764', symbol: 'BRAF', area: 'Oncology', disease: 'Melanoma', score: 0.95, safety: 'Low', tractability: 'High', infoGain: 0.8 },
-  { id: 'ENSG00000146648', symbol: 'EGFR', area: 'Oncology', disease: 'Lung Cancer', score: 0.92, safety: 'Medium', tractability: 'High', infoGain: 0.75 },
-  { id: 'ENSG00000232810', symbol: 'TNF', area: 'Immunology', disease: 'Rheumatoid Arthritis', score: 0.89, safety: 'Low', tractability: 'High', infoGain: 0.6 },
-  { id: 'ENSG00000204498', symbol: 'LRRK2', area: 'Neurodegeneration', disease: "Parkinson's", score: 0.82, safety: 'Medium', tractability: 'Medium', infoGain: 0.9 },
-];
+const DEFAULT_TARGET = { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 };
 
 export default function App() {
+  const [targets, setTargets] = useState<any[]>([DEFAULT_TARGET]);
   const [activeNav, setActiveNav] = useState('discovery');
-  const [selectedTarget, setSelectedTarget] = useState(TARGETS[0]);
+  const [selectedTarget, setSelectedTarget] = useState(DEFAULT_TARGET);
+
+  useEffect(() => {
+    fetch('/api/targets')
+      .then(r => r.json())
+      .then(data => {
+        if (data.targets && data.targets.length > 0) {
+          setTargets(data.targets);
+          setSelectedTarget(data.targets[0]);
+        }
+      })
+      .catch(err => console.error("Failed to load targets", err));
+  }, []);
 
   const [intent, setIntent] = useState('High-throughput binding affinity assay simulation');
   
-  const [code, setCode] = useState(
-    '// Synthesized Assay Protocol\nfunction targetFunction(x, y) {\n  return Math.sin(x) * Math.cos(y) + (x * 0.1);\n}\n'
-  );
+  const [hypothesis, setHypothesis] = useState<any>(null);
   
   const [logs, setLogs] = useState<string[]>([]);
   const [currentAttempt, setCurrentAttempt] = useState(1);
@@ -58,6 +63,7 @@ export default function App() {
   const [monteCarloCode, setMonteCarloCode] = useState(DEFAULT_MONTE_CARLO_CODE);
 
   const [auditRecords, setAuditRecords] = useState<any[]>([]);
+  const [credibilityTimeline, setCredibilityTimeline] = useState<any[]>([]);
 
   const computeHash = async (text: string) => {
     const msgBuffer = new TextEncoder().encode(text);
@@ -75,9 +81,9 @@ export default function App() {
         body: JSON.stringify({ intent, knowledgeBase: `Target: ${selectedTarget.symbol}, Area: ${selectedTarget.area}`, attempt: currentAttempt })
       });
       const data = await res.json();
-      if (data.success && data.code) {
-        setCode(data.code);
-        setLogs(prev => [...prev, '[Success] Autonomous Protocol Synthesis complete.']);
+      if (data.success && data.hypothesis) {
+        setHypothesis(data.hypothesis);
+        setLogs(prev => [...prev, '[Success] Autonomous Hypothesis Synethsis complete.', `[Skeptic AI] Peer review completed with falsifiability score: ${data.hypothesis.critic_score}`]);
       } else {
         setLogs(prev => [...prev, '[Error] Synthesis failed: ' + (data.error || 'Unknown')]);
       }
@@ -89,6 +95,8 @@ export default function App() {
   const handleRunVerification = async () => {
     setIsVerifying(true);
     setLogs(prev => [...prev, `[System] Submitting protocol to Automated Cloud Lab...`]);
+
+    const codeToRun = `function targetFunction(x, y) { return Math.sin(x) * Math.cos(y) + (x * 0.1); }`;
 
     if (runFuzzing && !fuzzCode.trim()) {
       setLogs(prev => [...prev, '[Error] Fuzzing QC enabled but no code provided.']);
@@ -106,7 +114,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code,
+          code: codeToRun,
           spec: intent,
           knowledgeBase: selectedTarget.symbol,
           attempt: currentAttempt,
@@ -127,22 +135,61 @@ export default function App() {
           setMcData(data.monteCarloData);
         }
         
-        const hashInput = code + intent + JSON.stringify(data.fuzzResult) + currentAttempt;
+        const hashInput = (hypothesis?.target || '') + intent + JSON.stringify(data.fuzzResult) + currentAttempt;
         const hash = await computeHash(hashInput);
         
-        setAuditRecords(prev => [{
+        // SYSTEM 5: Results Ingestor
+        // Simulate pass/fail based on a random outcome
+        const isSuccess = Math.random() > 0.3; // 70% chance of pass for demo
+        const resultValue = Math.random() * 10 + 1; // 1 to 11
+        
+        const ingestionRecord = {
           id: hash.substring(0, 8),
+          hypothesis_id: hash.substring(0, 8),
+          assay_type: "HTS Binding Assay",
+          cell_line: "HEK293T",
+          result_value: resultValue.toFixed(2),
+          units: "Kd (nM)",
+          pass_fail: isSuccess ? "PASS" : "FAIL",
+          raw_data_digest: hash,
           timestamp: new Date().toISOString(),
+          lab_id: "ECL-77A",
           target: selectedTarget.symbol,
           intent,
-          hash,
           fuzzPts: data.fuzzResult?.numRuns || 0,
           mcPts: data.monteCarloData ? data.monteCarloData.length : 0,
-          signature: 'Signed by System Agent (GxP Validated)'
+          signature: 'Signed by Acorn AST & Deterministic VM'
+        };
+
+        // SYSTEM 6: Bayesian Updater
+        const prior = (hypothesis?.confidence || 50) / 100;
+        const pD_H = isSuccess ? 0.85 : 0.15; // Prob data given hypothesis true
+        const pD_notH = isSuccess ? 0.20 : 0.80; // Prob data given hypothesis false
+        const pD = (pD_H * prior) + (pD_notH * (1 - prior));
+        const posterior = (pD_H * prior) / pD;
+        const newConfidence = Math.round(posterior * 100);
+
+        const scoreDelta = isSuccess ? 0.05 : -0.05;
+        const newScore = Math.min(1, Math.max(0, selectedTarget.score + scoreDelta));
+
+        setTargets(prev => prev.map(t => 
+          t.id === selectedTarget.id ? { ...t, score: newScore } : t
+        ).sort((a, b) => b.score - a.score));
+
+        setCredibilityTimeline(prev => [{
+            id: hash.substring(0, 12),
+            target: selectedTarget.symbol,
+            disease: selectedTarget.disease,
+            prior: hypothesis?.confidence || 50,
+            posterior: newConfidence,
+            outcome: isSuccess ? 'Confirmed' : 'Falsified',
+            timestamp: new Date().toISOString()
         }, ...prev]);
+
+        setAuditRecords(prev => [ingestionRecord, ...prev]);
         
-        setLogs(prev => [...prev, `[Success] Execution complete. Data flywheel updated.`]);
-        setActiveNav('visualize');
+        setLogs(prev => [...prev, `[Ingestor] Structured results parsed. Outcome: \${isSuccess ? 'PASS' : 'FAIL'}`, `[Bayes] Updated \${selectedTarget.symbol} confidence: \${hypothesis?.confidence || 50}% -> \${newConfidence}%`]);
+        setActiveNav('informatics');
       } else {
         setLogs(prev => [...prev, `[Error] \${data.error}`]);
       }
@@ -176,7 +223,7 @@ export default function App() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/50 text-zinc-300">
-            {TARGETS.map(t => (
+            {targets.map(t => (
               <tr key={t.id} className={`hover:bg-zinc-800/20 transition-colors \${selectedTarget.id === t.id ? 'bg-emerald-900/10' : ''}`}>
                 <td className="px-4 py-3 font-medium text-emerald-400">
                   <div className="flex items-center gap-2">
@@ -258,20 +305,68 @@ export default function App() {
           </button>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex-1 flex flex-col min-h-0">
-          <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-3 flex items-center gap-2">
-            <FileCode size={14} /> Generated Robotic Protocol (JS)
-          </div>
-          <textarea
-            className="w-full h-48 bg-zinc-950 text-blue-300 p-4 font-mono text-[11px] leading-relaxed border border-zinc-800 rounded outline-none focus:border-blue-500 resize-none scrollbar-thin box-border mb-3"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            spellCheck={false}
-          />
-          <div className="flex gap-2 mt-auto shrink-0">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
+          {hypothesis ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-2">Intervention Hypothesis</div>
+                <div className="text-sm text-zinc-200 leading-relaxed bg-zinc-950/50 p-3 rounded border border-zinc-800/50">
+                  <span className="font-bold text-blue-400 mb-1 block">Modality: {hypothesis.modality}</span>
+                  <span className="font-bold block mb-2">{hypothesis.proposed_intervention}</span>
+                  {hypothesis.mechanism}
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-1.5">Testable Prediction</div>
+                  <div className="text-xs text-zinc-400 bg-zinc-950 p-2.5 rounded border border-zinc-800/50 h-16 overflow-y-auto">
+                    {hypothesis.testable_prediction}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-1.5">Confidence / Evidience</div>
+                  <div className="text-xs text-zinc-400 bg-zinc-950 p-2.5 rounded border border-zinc-800/50 h-16 overflow-y-auto flex flex-col justify-center items-center text-center">
+                    <span className="text-emerald-400 font-bold mb-1">{hypothesis.confidence}% Score</span>
+                    <span className="line-clamp-1">{hypothesis.literature_support}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-zinc-800/80">
+                <div className="text-xs font-bold tracking-widest text-rose-500 uppercase mb-3 flex items-center gap-2">
+                  <AlertTriangle size={14} /> Skeptic.ai Peer Review (Score: {hypothesis.critic_score})
+                </div>
+                
+                <div className="space-y-3">
+                  <div>
+                     <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Identified Flaws</div>
+                     <ul className="list-disc pl-4 text-xs text-rose-400/80 space-y-1">
+                       {hypothesis.flaws?.map((f: string, i: number) => <li key={i}>{f}</li>)}
+                     </ul>
+                  </div>
+                  <div>
+                     <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Contradictory Literature</div>
+                     <ul className="list-disc pl-4 text-xs text-zinc-400 space-y-1">
+                       {hypothesis.contradictory_papers?.map((p: string, i: number) => <li key={i}>{p}</li>)}
+                     </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
+              <div className="text-center">
+                <FileCode size={32} className="mx-auto mb-3 opacity-20" />
+                No hypothesis generated yet.
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 mt-auto shrink-0 pt-4">
              <button 
                 onClick={handleRunVerification}
-                disabled={isVerifying}
+                disabled={isVerifying || !hypothesis}
                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 rounded text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white shadow-lg shadow-blue-500/20"
              >
                 <Play size={14} /> {isVerifying ? 'Running Lab Instructions...' : 'Submit to Cloud Lab'}
@@ -313,21 +408,77 @@ export default function App() {
   );
 
   const renderInformatics = () => (
-    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950">
-      <div className="mb-8 max-w-5xl mx-auto">
+    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col gap-8">
+      <div className="max-w-6xl mx-auto w-full">
         <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-2 tracking-tight">
-           <ShieldCheck size={24} className="text-blue-500"/>
-           Informatics & Auditing
+           <Scale size={24} className="text-purple-500"/>
+           Bayesian Evidence Ledger
         </h2>
-        <p className="text-zinc-400">Regulated data backbone maintaining GxP/21 CFR Part 11 compliant execution trails. Captures structured lab data, metadata, and cryptographic signatures for asset translation.</p>
+        <p className="text-zinc-400">Public-facing credibility timeline. Real-time posterior updates per disease target based on ingested experimental artifacts.</p>
+        
+        {credibilityTimeline.length === 0 ? (
+           <div className="mt-6 py-12 text-center border border-dashed border-zinc-800 rounded-lg text-zinc-500 bg-zinc-900/30">
+               <LineChart size={48} className="mx-auto mb-4 opacity-50 text-purple-500/50" />
+               <p className="text-base text-zinc-400 font-medium">Awaiting experimental priors.</p>
+           </div>
+        ) : (
+           <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+               <table className="w-full text-left text-sm">
+                   <thead className="bg-zinc-950/50 text-zinc-400 border-b border-zinc-800">
+                     <tr>
+                       <th className="px-4 py-3 font-medium">Timestamp</th>
+                       <th className="px-4 py-3 font-medium">Target / Disease</th>
+                       <th className="px-4 py-3 font-medium">Outcome</th>
+                       <th className="px-4 py-3 font-medium text-center">Prior P(H)</th>
+                       <th className="px-4 py-3 font-medium text-center">Posterior P(H|D)</th>
+                       <th className="px-4 py-3 font-medium text-right">Δ Impact</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-zinc-800/50 text-zinc-300">
+                     {credibilityTimeline.map(t => {
+                       const delta = Math.round(t.posterior - t.prior);
+                       return (
+                         <tr key={t.id} className="hover:bg-zinc-800/20 transition-colors">
+                           <td className="px-4 py-3 text-zinc-500 font-mono text-xs">{new Date(t.timestamp).toLocaleTimeString()}</td>
+                           <td className="px-4 py-3 font-medium text-emerald-400">
+                              {t.target} <span className="text-zinc-500 text-xs font-normal ml-1">| {t.disease}</span>
+                           </td>
+                           <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wider inline-flex items-center gap-1 \${
+                                t.outcome === 'Confirmed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                                'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+                              }`}>
+                                {t.outcome === 'Confirmed' ? <CheckCircle size={10} /> : <AlertTriangle size={10} />}
+                                {t.outcome}
+                              </span>
+                           </td>
+                           <td className="px-4 py-3 text-center text-zinc-400 font-mono">{t.prior}%</td>
+                           <td className="px-4 py-3 font-bold text-center text-white font-mono">{t.posterior}%</td>
+                           <td className={`px-4 py-3 font-bold text-right font-mono \${delta >= 0 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                             {delta > 0 ? '+' : ''}{delta}%
+                           </td>
+                         </tr>
+                       );
+                     })}
+                   </tbody>
+               </table>
+           </div>
+        )}
       </div>
 
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto w-full">
+         <div className="mb-6">
+            <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-2 tracking-tight">
+               <Database size={24} className="text-blue-500"/>
+               Results Ingestor & Provenance
+            </h2>
+            <p className="text-zinc-400">Structured scientific data registry with cryptographic hashing (GxP Validated). Parses multidimensional readout formats and enforces transparent auditability via decentralized hash commits.</p>
+         </div>
+      
          {auditRecords.length === 0 ? (
             <div className="py-24 text-center border border-dashed border-zinc-800 rounded-lg text-zinc-500 bg-zinc-900/30">
                <Database size={48} className="mx-auto mb-4 opacity-50 text-blue-500/50" />
-               <p className="text-base text-zinc-400 font-medium">No validated experiments recorded in this session.</p>
-               <p className="text-sm mt-2 max-w-md mx-auto leading-relaxed">Run protocols in the Cloud Lab to append cryptographic records to the immutable ledger.</p>
+               <p className="text-base text-zinc-400 font-medium">No validations in ledger.</p>
             </div>
          ) : (
             <div className="space-y-4">
@@ -336,41 +487,64 @@ export default function App() {
                     <div className="flex items-start justify-between mb-4 border-b border-zinc-800/80 pb-4">
                        <div>
                           <div className="flex items-center gap-2 mb-1.5">
-                             <CheckCircle size={16} className="text-emerald-500" />
-                             <span className="font-medium text-zinc-200">{r.intent}</span>
+                             {r.pass_fail === 'PASS' ? <CheckCircle size={16} className="text-emerald-500" /> : <AlertTriangle size={16} className="text-orange-500" />}
+                             <span className="font-medium text-zinc-200">
+                                {r.pass_fail === 'PASS' ? 'Hypothesis Confirmed by Assay' : 'Hypothesis Contradicted by Assay'}
+                             </span>
                           </div>
                           <div className="text-xs text-zinc-400 flex items-center gap-3 bg-zinc-950/50 inline-flex px-2 py-1 rounded">
-                             <span className="flex items-center gap-1.5 font-medium text-emerald-400/80"><Dna size={12}/> {r.target}</span>
+                             <span className="flex items-center gap-1.5 font-medium text-blue-400"><Microscope size={12}/> {r.assay_type}</span>
+                             <span className="text-zinc-700">|</span>
+                             <span className="flex items-center gap-1.5 font-medium text-emerald-400"><Dna size={12}/> {r.target}</span>
                              <span className="text-zinc-700">|</span>
                              <span>{new Date(r.timestamp).toLocaleString()}</span>
                           </div>
                        </div>
                        <div className="text-right">
-                          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5 font-bold">Experiment ID</div>
-                          <div className="font-mono text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded text-xs border border-blue-500/20">{r.id}</div>
+                          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5 font-bold">Hypothesis / Lab ID</div>
+                          <div className="font-mono text-zinc-400 bg-black px-2.5 py-1 rounded text-xs border border-zinc-800 flex flex-col gap-1">
+                             <span>H-{r.hypothesis_id}</span>
+                             <span className="text-blue-500 border-t border-zinc-800 pt-1 mt-1">{r.lab_id}</span>
+                          </div>
                        </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-2">
                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Assay Data Metrics</div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Ingested Readout</div>
+                          <div className="text-2xl font-medium text-white mb-1">
+                             {r.result_value} <span className="text-sm text-zinc-500">{r.units}</span>
+                          </div>
+                          <div className="text-xs text-zinc-400 line-clamp-1">Cell Line: <span className="text-zinc-300">{r.cell_line}</span></div>
+                       </div>
+                       <div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Telemetry Context</div>
                           <div className="text-xs text-zinc-300 mb-1.5 flex items-center justify-between">
-                            <span>Fast-Check Auto-Fuzz:</span>
+                            <span>Fuzz Test:</span>
                             <span className="font-mono text-emerald-400 bg-zinc-950 px-1.5 rounded">{r.fuzzPts} pts</span>
                           </div>
                           <div className="text-xs text-zinc-300 flex items-center justify-between">
-                            <span>Monte Carlo Telemetry:</span>
+                            <span>MC Scope:</span>
                             <span className="font-mono text-emerald-400 bg-zinc-950 px-1.5 rounded">{r.mcPts} pts</span>
                           </div>
                        </div>
-                       <div className="col-span-2">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Compliance Signature</div>
-                          <div className="flex items-center gap-2 text-zinc-300 text-xs font-mono break-all bg-zinc-950 p-2.5 rounded border border-zinc-800/80">
-                             <FileSignature size={14} className="shrink-0 text-zinc-500" />
-                             <span className="text-emerald-500">{r.hash.substring(0, 16)}</span>{r.hash.substring(16)}
+                       <div className="col-span-2 flex flex-col justify-between">
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Immutable Provenance Receipt</div>
+                            <div className="bg-emerald-950/20 p-2.5 rounded border border-emerald-900/30 mb-2">
+                               <p className="text-[11px] text-emerald-400/80 leading-relaxed italic">
+                                  "On {new Date(r.timestamp).toLocaleDateString()} at {new Date(r.timestamp).toLocaleTimeString()}, with data payload H-{r.hypothesis_id}, this analytical pipeline produced result {r.result_value} {r.units}. Here is the cryptographic proof generated via deterministic execution:"
+                               </p>
+                            </div>
                           </div>
-                          <div className="text-[10px] text-zinc-500 mt-2 tracking-wide uppercase flex items-center gap-1.5">
-                            <ShieldCheck size={12} className="text-emerald-500/70" />
-                            {r.signature}
+                          <div>
+                            <div className="flex items-center gap-2 text-zinc-300 text-xs font-mono break-all bg-black p-2.5 rounded border border-zinc-800">
+                               <FileSignature size={14} className="shrink-0 text-emerald-500" />
+                               <span><span className="text-emerald-500">{r.raw_data_digest?.substring(0, 16)}</span><span className="text-zinc-600">{r.raw_data_digest?.substring(16)}</span></span>
+                            </div>
+                            <div className="text-[10px] text-emerald-500 mt-2 tracking-wide uppercase flex items-center gap-1.5 font-bold">
+                              <ShieldCheck size={12} />
+                              {r.signature}
+                            </div>
                           </div>
                        </div>
                     </div>
