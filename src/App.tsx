@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Target as TargetType, Hypothesis, AuditRecord, DaemonLog, UploadedFile, CredibilityEvent, MonteCarloData } from './types';
 import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu, Bot, Brain, MoonStar, Zap, FileText, Target } from 'lucide-react';
 import { Visualizer } from './Visualizer';
 
@@ -32,9 +33,9 @@ result = points;`;
 const DEFAULT_TARGET = { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 };
 
 export default function App() {
-  const [targets, setTargets] = useState<any[]>([DEFAULT_TARGET]);
+  const [targets, setTargets] = useState<TargetType[]>([DEFAULT_TARGET]);
   const [activeNav, setActiveNav] = useState('discovery');
-  const [selectedTarget, setSelectedTarget] = useState(DEFAULT_TARGET);
+  const [selectedTarget, setSelectedTarget] = useState<TargetType>(DEFAULT_TARGET);
 
   useEffect(() => {
     fetch('/api/targets')
@@ -50,27 +51,28 @@ export default function App() {
 
   const [intent, setIntent] = useState('High-throughput binding affinity assay simulation');
   
-  const [hypothesis, setHypothesis] = useState<any>(null);
+  const [hypothesis, setHypothesis] = useState<Hypothesis | null>(null);
   
   const [logs, setLogs] = useState<string[]>([]);
   const [currentAttempt, setCurrentAttempt] = useState(1);
   const [isVerifying, setIsVerifying] = useState(false);
   
-  const [mcData, setMcData] = useState<any[]>([]);
+  const [mcData, setMcData] = useState<MonteCarloData[]>([]);
   const [runMonteCarlo, setRunMonteCarlo] = useState(true);
   const [runFuzzing, setRunFuzzing] = useState(true);
   const [fuzzCode, setFuzzCode] = useState(DEFAULT_FUZZ_CODE);
   const [monteCarloCode, setMonteCarloCode] = useState(DEFAULT_MONTE_CARLO_CODE);
 
-  const [auditRecords, setAuditRecords] = useState<any[]>([]);
-  const [credibilityTimeline, setCredibilityTimeline] = useState<any[]>([]);
+  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
+  const [credibilityTimeline, setCredibilityTimeline] = useState<CredibilityEvent[]>([]);
 
-  const [daemonLogs, setDaemonLogs] = useState<any[]>([
+  const [daemonLogs, setDaemonLogs] = useState<DaemonLog[]>([
     { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: 'Kairos Daemon initialized. 15s tick loop active.' }
   ]);
+  const [dreamLogs, setDreamLogs] = useState<DaemonLog[]>([]);
   const [isDreaming, setIsDreaming] = useState(false);
 
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -93,7 +95,14 @@ export default function App() {
         setTargets(prev => {
           const newTargets = [...prev];
           if (newTargets.length > 0) {
-            newTargets[0] = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + 0.02) };
+            const updatedTarget = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + 0.02) };
+            newTargets[0] = updatedTarget;
+            
+            fetch(`/api/targets/${updatedTarget.id}`, {
+               method: 'PATCH',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ score: updatedTarget.score })
+            }).catch(console.error);
           }
           return newTargets;
         });
@@ -126,21 +135,21 @@ export default function App() {
 
   const triggerDreamCycle = () => {
     setIsDreaming(true);
-    setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream', message: '[AutoDream] Nightly consolidation cycle initiated...' }, ...prev]);
+    setDreamLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream', message: '[AutoDream] Nightly consolidation cycle initiated...' }, ...prev]);
     
     // Simulate NREM
     setTimeout(() => {
-      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_nrem', message: '[AutoDream: NREM phase] Consolidating day\'s empirical data into BioLM weights. Posteriors updated.' }, ...prev]);
+      setDreamLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_nrem', message: '[AutoDream: NREM phase] Consolidating day\'s empirical data into BioLM weights. Posteriors updated.' }, ...prev]);
     }, 3000);
 
     // Simulate REM
     setTimeout(() => {
-      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_rem', message: '[AutoDream: REM phase] nanoGPT generating novel counterfactual hypotheses via synthetic rollouts...' }, ...prev]);
+      setDreamLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_rem', message: '[AutoDream: REM phase] nanoGPT generating novel counterfactual hypotheses via synthetic rollouts...' }, ...prev]);
     }, 6000);
 
     // Wake up
     setTimeout(() => {
-      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_wake', message: '[AutoDream: Wake] Consolidation complete. Knowledge graph optimized. 3 new hypotheses staged.' }, ...prev]);
+      setDreamLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_wake', message: '[AutoDream: Wake] Consolidation complete. Knowledge graph optimized. 3 new hypotheses staged.' }, ...prev]);
       setIsDreaming(false);
     }, 9000);
   };
@@ -268,6 +277,13 @@ export default function App() {
         setTargets(prev => prev.map(t => 
           t.id === selectedTarget.id ? { ...t, score: newScore } : t
         ).sort((a, b) => b.score - a.score));
+
+        // Persist score back to DB
+        fetch(`/api/targets/${selectedTarget.id}`, {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ score: newScore })
+        }).catch(err => console.error('Failed to update target:', err));
 
         setCredibilityTimeline(prev => [{
             id: hash.substring(0, 12),
@@ -782,7 +798,7 @@ export default function App() {
                   <span className="text-xs font-mono text-zinc-500">TICK = 15s</span>
                </div>
                <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[11px] bg-zinc-950 scrollbar-thin">
-                  {daemonLogs.filter(l => l.type === 'tick' || l.type === 'system').map((l) => (
+                  {daemonLogs.map((l) => (
                     <div key={l.id} className="border-l-2 border-amber-500/30 pl-2">
                        <div className="text-zinc-500 mb-0.5">{new Date(l.timestamp).toLocaleTimeString()}</div>
                        <div className="text-zinc-300">{l.message}</div>
@@ -818,7 +834,7 @@ export default function App() {
                   </div>
                </div>
                <div className="flex-1 p-4 overflow-y-auto space-y-3 font-mono text-[11px] bg-zinc-950 scrollbar-thin">
-                  {daemonLogs.filter(l => l.type.startsWith('dream')).map((l) => (
+                  {dreamLogs.map((l) => (
                     <div key={l.id} className={`border-l-2 pl-3 py-1 ${l.type === 'dream_rem' ? 'border-purple-500/50' : l.type === 'dream_nrem' ? 'border-emerald-500/50' : 'border-blue-500/50'}`}>
                        <div className="text-zinc-500 mb-1">{new Date(l.timestamp).toLocaleTimeString()}</div>
                        <div className={`${l.type === 'dream_rem' ? 'text-purple-300' : l.type === 'dream_nrem' ? 'text-emerald-300' : 'text-blue-300 font-bold'}`}>
@@ -826,7 +842,7 @@ export default function App() {
                        </div>
                     </div>
                   ))}
-                  {daemonLogs.filter(l => l.type.startsWith('dream')).length === 0 && (
+                  {dreamLogs.length === 0 && (
                      <div className="h-full flex flex-col justify-center items-center text-zinc-600 space-y-3 opacity-50">
                         <MoonStar size={32} />
                         <span>Awaiting idle state...</span>

@@ -196,6 +196,21 @@ app.get('/api/targets', (_req, res) => {
   }
 });
 
+app.patch('/api/targets/:id', authenticate, (req, res) => {
+  try {
+    const { id } = req.params;
+    const { score } = req.body;
+    if (typeof score !== 'number') {
+      return res.status(400).json({ error: 'Invalid score' });
+    }
+    db.prepare('UPDATE targets SET score = @score WHERE id = @id').run({ id, score });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to update target:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /api/synthesize – generator + skeptic code generation via Gemini
 // ---------------------------------------------------------------------------

@@ -54,3 +54,20 @@ export interface UploadedFile {
   timestamp: string;
   status: string;
 }
+
+export interface CredibilityEvent {
+  id: string;
+  target: string;
+  disease: string;
+  prior: number;
+  posterior: number;
+  outcome: string;
+  timestamp: string;
+}
+
+export interface MonteCarloData {
+  x: number;
+  y: number;
+  z: number;
+  error?: string;
+}
