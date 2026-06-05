@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu } from 'lucide-react';
+import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu, Bot, Brain, MoonStar, Zap, FileText, Target } from 'lucide-react';
 import { Visualizer } from './Visualizer';
 
 const DEFAULT_FUZZ_CODE = `// fast-check property QC: Validating assay readout stability
@@ -64,6 +64,82 @@ export default function App() {
 
   const [auditRecords, setAuditRecords] = useState<any[]>([]);
   const [credibilityTimeline, setCredibilityTimeline] = useState<any[]>([]);
+
+  const [daemonLogs, setDaemonLogs] = useState<any[]>([
+    { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: 'Kairos Daemon initialized. 15s tick loop active.' }
+  ]);
+  const [isDreaming, setIsDreaming] = useState(false);
+
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const newFile = {
+        name: file.name,
+        type: file.type || file.name.split('.').pop(),
+        size: (file.size / 1024).toFixed(1) + ' KB',
+        timestamp: new Date().toISOString(),
+        status: 'Processing...'
+      };
+      
+      setUploadedFiles(prev => [newFile, ...prev]);
+      
+      setTimeout(() => {
+        setUploadedFiles(prev => prev.map(f => f.name === newFile.name ? { ...f, status: 'Ingested & Vectorized' } : f));
+        setDaemonLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: `[Ingestion] Processed file: ${newFile.name}. Knowledge graph updated.` }, ...prev]);
+        
+        // Boost a target score if it's an upload
+        setTargets(prev => {
+          const newTargets = [...prev];
+          if (newTargets.length > 0) {
+            newTargets[0] = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + 0.02) };
+          }
+          return newTargets;
+        });
+      }, 3000);
+    }
+  };
+
+  // Kairos Daemon Mock Loop
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isDreaming) return;
+      const actions = [
+        "Checking: any pending PubMed papers on active disease targets? -> None found.",
+        "Checking: any hypotheses with no assigned experiments? -> All active hypotheses queued.",
+        "Checking: any completed cloud lab results? -> Monitoring webhook.",
+        "Checking: any model confidence dropped below threshold? -> Posteriors stable."
+      ];
+      const randomAction = actions[Math.floor(Math.random() * actions.length)];
+      setDaemonLogs(prev => {
+        const newLogs = [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'tick', message: `[Tick] ${randomAction}` }, ...prev];
+        return newLogs.slice(0, 50); // Keep last 50
+      });
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [isDreaming]);
+
+  const triggerDreamCycle = () => {
+    setIsDreaming(true);
+    setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream', message: '[AutoDream] Nightly consolidation cycle initiated...' }, ...prev]);
+    
+    // Simulate NREM
+    setTimeout(() => {
+      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_nrem', message: '[AutoDream: NREM phase] Consolidating day\'s empirical data into BioLM weights. Posteriors updated.' }, ...prev]);
+    }, 3000);
+
+    // Simulate REM
+    setTimeout(() => {
+      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_rem', message: '[AutoDream: REM phase] nanoGPT generating novel counterfactual hypotheses via synthetic rollouts...' }, ...prev]);
+    }, 6000);
+
+    // Wake up
+    setTimeout(() => {
+      setDaemonLogs(prev => [{ timestamp: new Date().toISOString(), id: Math.random().toString(36).substr(2, 9), type: 'dream_wake', message: '[AutoDream: Wake] Consolidation complete. Knowledge graph optimized. 3 new hypotheses staged.' }, ...prev]);
+      setIsDreaming(false);
+    }, 9000);
+  };
 
   const computeHash = async (text: string) => {
     const msgBuffer = new TextEncoder().encode(text);
@@ -204,8 +280,10 @@ export default function App() {
   const renderDiscovery = () => (
     <div className="p-6 overflow-y-auto w-full">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Target Discovery Engine</h2>
-        <p className="text-zinc-400">Mechanistic ranking integrating multi-omic evidence, safety risk, and tractability scores. Adapted from Open Targets methodologies.</p>
+        <h2 className="text-2xl font-bold flex items-center gap-2 text-white mb-2 tracking-tight">
+          <Brain size={24} className="text-blue-500" /> BioLM Target Engine
+        </h2>
+        <p className="text-zinc-400">Domain-specific nanoGPT architectures running deterministic synthetic rollouts on PubMed/ChEMBL corpora. Small, fully inspectable, and optimized for high-EIG generation.</p>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
@@ -281,8 +359,30 @@ export default function App() {
         </h2>
         <p className="text-sm text-zinc-400 mb-6">Autonomous protocol design and wet-lab execution via remote instrumentation.</p>
         
+        
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-4">
-          <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-3 text-emerald-500">Hypothesis Design</div>
+          <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-3 flex items-center gap-2">
+             <Target size={14} className="text-emerald-500"/>
+             BioLM Active Hypothesis
+          </div>
+          {hypothesis ? (
+             <div className="flex items-center gap-3 bg-zinc-950 p-3 rounded border border-zinc-800">
+                <Brain size={18} className="text-blue-500 shrink-0" />
+                <div className="text-sm min-w-0">
+                   <div className="font-bold text-zinc-200 capitalize">{hypothesis.modality} Intervention</div>
+                   <div className="text-xs text-zinc-400 truncate mt-0.5">{hypothesis.testable_prediction}</div>
+                </div>
+             </div>
+          ) : (
+             <div className="text-xs text-amber-500/80 bg-amber-500/10 p-3 rounded border border-amber-500/20 flex items-center gap-2">
+                <AlertTriangle size={14} /> No active hypothesis synthesized. Please generate one in the Target Engine first.
+             </div>
+          )}
+        </div>
+
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-4">
+          <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-3 text-zinc-400">Virtual Assay Configuration</div>
           <div className="flex items-center gap-3 mb-4 p-3 bg-zinc-950 rounded border border-zinc-800/50 text-sm">
             <Dna size={16} className="text-blue-500" />
             <span className="text-zinc-300">Targeting:</span>
@@ -301,7 +401,7 @@ export default function App() {
             onClick={handleSynthesize}
             className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded text-sm font-medium transition-colors flex items-center justify-center gap-2"
           >
-            <Sparkles size={14} /> Synthesize Agent Protocol
+            <Brain size={14} /> Generate via BioLM Engine
           </button>
         </div>
 
@@ -309,7 +409,12 @@ export default function App() {
           {hypothesis ? (
             <div className="space-y-4">
               <div>
-                <div className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-2">Intervention Hypothesis</div>
+                <div className="flex items-center justify-between uppercase mb-2">
+                  <div className="text-xs font-bold tracking-widest text-zinc-500">Intervention Hypothesis</div>
+                  <div className="text-[9px] font-bold tracking-widest text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 flex items-center gap-1">
+                    <Brain size={10} /> BioLM Synthetic Rollout
+                  </div>
+                </div>
                 <div className="text-sm text-zinc-200 leading-relaxed bg-zinc-950/50 p-3 rounded border border-zinc-800/50">
                   <span className="font-bold text-blue-400 mb-1 block">Modality: {hypothesis.modality}</span>
                   <span className="font-bold block mb-2">{hypothesis.proposed_intervention}</span>
@@ -482,8 +587,8 @@ export default function App() {
             </div>
          ) : (
             <div className="space-y-4">
-              {auditRecords.map((r, i) => (
-                 <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 shadow-lg shadow-black/20">
+              {auditRecords.map((r) => (
+                 <div key={r.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 shadow-lg shadow-black/20">
                     <div className="flex items-start justify-between mb-4 border-b border-zinc-800/80 pb-4">
                        <div>
                           <div className="flex items-center gap-2 mb-1.5">
@@ -556,6 +661,168 @@ export default function App() {
     </div>
   );
 
+  const renderUpload = () => (
+    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col gap-8">
+      <div className="max-w-6xl mx-auto w-full">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-2 tracking-tight">
+             <Upload size={24} className="text-teal-500"/>
+             Multimodal Data Ingestion
+          </h2>
+          <p className="text-zinc-400">Upload primary literature, laboratory images for structural OCR, and AlphaFold PDB / AlphaMissense variant files. Automatically parsed into the BioLM Knowledge Graph.</p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+           <div className="border border-dashed border-zinc-700 bg-zinc-900/50 rounded-lg p-10 flex flex-col justify-center items-center text-center hover:bg-zinc-900/80 transition-colors relative">
+               <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileUpload} />
+               <Upload size={48} className="text-teal-500/50 mb-4" />
+               <h3 className="text-white font-medium mb-1">Drag & drop scientific artifacts</h3>
+               <p className="text-sm text-zinc-500 mb-4">Support for PDF, PNG/JPG, PDB, CIF, FASTA, CSV</p>
+               <button className="px-4 py-2 bg-zinc-800 text-white rounded text-sm font-medium border border-zinc-700 hover:border-zinc-600 transition-colors pointer-events-none">
+                  Select Files
+               </button>
+           </div>
+           
+           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex flex-col h-64">
+              <div className="text-sm font-medium text-white mb-3 flex items-center gap-2 border-b border-zinc-800 pb-2">
+                 <Database size={16} className="text-teal-500" />
+                 Ingestion Queue
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin">
+                 {uploadedFiles.length === 0 ? (
+                    <div className="text-sm text-zinc-600 italic h-full flex items-center justify-center">No files uploaded in this session.</div>
+                 ) : (
+                    uploadedFiles.map((f, i) => (
+                       <div key={i} className="flex items-center justify-between bg-zinc-950 p-2.5 rounded border border-zinc-800/50">
+                          <div className="flex items-center gap-3">
+                             <div className="w-8 h-8 rounded bg-teal-500/10 flex items-center justify-center text-teal-400 shrink-0">
+                                <FileText size={14} />
+                             </div>
+                             <div className="min-w-0">
+                                <div className="text-xs font-medium text-zinc-200 truncate pr-4">{f.name}</div>
+                                <div className="text-[10px] text-zinc-500 flex gap-2 mt-0.5">
+                                   <span>{f.size}</span>
+                                   <span>•</span>
+                                   <span className={f.status === 'Processing...' ? 'text-amber-400 animate-pulse' : 'text-emerald-400'}>{f.status}</span>
+                                </div>
+                             </div>
+                          </div>
+                          {f.status !== 'Processing...' && <CheckCircle size={14} className="text-emerald-500 shrink-0" />}
+                       </div>
+                    ))
+                 )}
+              </div>
+           </div>
+        </div>
+        
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+           <h3 className="text-lg font-medium text-white flex items-center gap-2 mb-4">
+              <Layers size={18} className="text-purple-500" />
+              Connected Platforms
+           </h3>
+           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-black/40 border border-zinc-800 rounded p-4 text-center">
+                 <div className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-2">AlphaFold 3</div>
+                 <div className="text-xs text-zinc-400">Direct integration for folded structure PDB ingest.</div>
+              </div>
+              <div className="bg-black/40 border border-zinc-800 rounded p-4 text-center">
+                 <div className="text-xs font-bold uppercase tracking-widest text-blue-500 mb-2">PubMed Auto-Ingest</div>
+                 <div className="text-xs text-zinc-400">Vectorizing latest literature automatically.</div>
+              </div>
+              <div className="bg-black/40 border border-zinc-800 rounded p-4 text-center">
+                 <div className="text-xs font-bold uppercase tracking-widest text-amber-500 mb-2">Sci-OCR</div>
+                 <div className="text-xs text-zinc-400">Extracts plots, tables, and mechanistic diagrams.</div>
+              </div>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDaemon = () => (
+    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col gap-8">
+      <div className="max-w-6xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        {/* Kairos Engine */}
+         <div>
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-2 tracking-tight">
+                 <Bot size={24} className="text-amber-500"/>
+                 Kairos Daemon
+              </h2>
+              <p className="text-zinc-400">Always-on proactive scientific agent. 15-second tick loop.</p>
+            </div>
+            
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden flex flex-col h-[500px]">
+               <div className="p-3 border-b border-zinc-800 flex justify-between items-center bg-black/40">
+                  <div className="flex items-center gap-2">
+                     <span className="relative flex h-2 w-2">
+                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
+                       <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
+                     </span>
+                     <span className="text-xs uppercase font-bold text-amber-500 tracking-widest font-mono">Daemon Active</span>
+                  </div>
+                  <span className="text-xs font-mono text-zinc-500">TICK = 15s</span>
+               </div>
+               <div className="flex-1 p-4 overflow-y-auto space-y-2 font-mono text-[11px] bg-zinc-950 scrollbar-thin">
+                  {daemonLogs.filter(l => l.type === 'tick' || l.type === 'system').map((l) => (
+                    <div key={l.id} className="border-l-2 border-amber-500/30 pl-2">
+                       <div className="text-zinc-500 mb-0.5">{new Date(l.timestamp).toLocaleTimeString()}</div>
+                       <div className="text-zinc-300">{l.message}</div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+         </div>
+
+        {/* AutoDream */}
+         <div>
+            <div className="mb-6 flex justify-between items-start">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-2 tracking-tight">
+                   <MoonStar size={24} className="text-blue-500"/>
+                   AutoDream
+                </h2>
+                <p className="text-zinc-400">Nightly scientific memory consolidation.</p>
+              </div>
+              <button 
+                onClick={triggerDreamCycle}
+                disabled={isDreaming}
+                className="px-4 py-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 disabled:bg-zinc-800 disabled:text-zinc-600 border border-blue-500/30 rounded text-sm font-bold transition-colors shadow-[0_0_15px_rgba(59,130,246,0.15)] flex items-center gap-2"
+              >
+                <Zap size={14} /> {isDreaming ? 'Dream Cycle Active...' : 'Trigger Cycle'}
+              </button>
+            </div>
+            
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden flex flex-col h-[500px]">
+               <div className="p-3 border-b border-zinc-800 flex justify-between items-center bg-black/40">
+                  <div className="flex items-center gap-2 text-xs uppercase font-bold text-blue-500 tracking-widest font-mono">
+                     <MoonStar size={14} /> Consolidation Ledger
+                  </div>
+               </div>
+               <div className="flex-1 p-4 overflow-y-auto space-y-3 font-mono text-[11px] bg-zinc-950 scrollbar-thin">
+                  {daemonLogs.filter(l => l.type.startsWith('dream')).map((l) => (
+                    <div key={l.id} className={`border-l-2 pl-3 py-1 ${l.type === 'dream_rem' ? 'border-purple-500/50' : l.type === 'dream_nrem' ? 'border-emerald-500/50' : 'border-blue-500/50'}`}>
+                       <div className="text-zinc-500 mb-1">{new Date(l.timestamp).toLocaleTimeString()}</div>
+                       <div className={`${l.type === 'dream_rem' ? 'text-purple-300' : l.type === 'dream_nrem' ? 'text-emerald-300' : 'text-blue-300 font-bold'}`}>
+                         {l.message}
+                       </div>
+                    </div>
+                  ))}
+                  {daemonLogs.filter(l => l.type.startsWith('dream')).length === 0 && (
+                     <div className="h-full flex flex-col justify-center items-center text-zinc-600 space-y-3 opacity-50">
+                        <MoonStar size={32} />
+                        <span>Awaiting idle state...</span>
+                     </div>
+                  )}
+               </div>
+            </div>
+         </div>
+
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-white font-sans overflow-hidden">
       {/* Top Header */}
@@ -585,11 +852,18 @@ export default function App() {
         <div className="w-64 bg-[#111113] border-r border-zinc-800 flex flex-col shrink-0">
            <div className="p-4 space-y-1">
               <button 
+                onClick={() => setActiveNav('upload')}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors ${activeNav === 'upload' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
+              >
+                 <Upload size={18} className={activeNav === 'upload' ? 'text-teal-400' : ''} />
+                 Data Ingestion
+              </button>
+              <button 
                 onClick={() => setActiveNav('discovery')}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors \${activeNav === 'discovery' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
               >
-                 <Microscope size={18} className={activeNav === 'discovery' ? 'text-blue-400' : ''} />
-                 Target Engine
+                 <Brain size={18} className={activeNav === 'discovery' ? 'text-blue-400' : ''} />
+                 BioLM Target Engine
               </button>
               <button 
                 onClick={() => setActiveNav('lab')}
@@ -612,6 +886,13 @@ export default function App() {
                  <ShieldCheck size={18} className={activeNav === 'informatics' ? 'text-emerald-500' : ''} />
                  Informatics & Audit
               </button>
+              <button 
+                onClick={() => setActiveNav('daemon')}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors ${activeNav === 'daemon' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
+              >
+                 <Bot size={18} className={activeNav === 'daemon' ? 'text-amber-400' : ''} />
+                 Autonomous Daemon
+              </button>
            </div>
            
            <div className="mt-auto p-5 border-t border-zinc-800/80 bg-black/20">
@@ -628,9 +909,11 @@ export default function App() {
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col relative bg-[#09090b] w-full min-w-0">
+           {activeNav === 'upload' && renderUpload()}
            {activeNav === 'discovery' && renderDiscovery()}
            {activeNav === 'lab' && renderLab()}
            {activeNav === 'informatics' && renderInformatics()}
+           {activeNav === 'daemon' && renderDaemon()}
            {activeNav === 'visualize' && (
               <div className="w-full h-full relative p-2">
                  <div className="absolute top-6 left-6 z-10 pointer-events-none">

@@ -90,6 +90,15 @@ function Scene({ data }: { data: Point[] }) {
     return geom;
   }, [data, minZ, rangeZ]);
 
+  // Ensure old geometry is disposed when a new one is created
+  React.useEffect(() => {
+    return () => {
+      if (geometry) {
+        geometry.dispose();
+      }
+    };
+  }, [geometry]);
+
   // ---- Gentle idle rotation (pauses while user interacts) ----
   useFrame((_, delta) => {
     if (autoRotate && pointsRef.current) {

@@ -58,11 +58,25 @@ app.post('/api/verify', async (req, res) => {
       monteCarloCode,  // user-provided Monte Carlo code (sets sandbox.result)
     } = req.body;
 
-    // 1. Syntax validation with Acorn
+    // 1. Syntax & Security validation with Acorn
     try {
-      parse(code, { ecmaVersion: 2024, sourceType: 'script' });
+      const validateSecureAST = (source: string) => {
+        if (!source) return;
+        const ast = parse(source, { ecmaVersion: 2024, sourceType: 'script' });
+        const astJson = JSON.stringify(ast);
+        const forbidden = ["process", "require", "constructor", "__proto__", "eval", "global", "globalThis"];
+        for (const word of forbidden) {
+          if (astJson.includes(`"name":"${word}"`) || astJson.includes(`"value":"${word}"`)) {
+            throw new Error(`Security Violation: Use of forbidden identifier or string: ${word}`);
+          }
+        }
+      };
+
+      validateSecureAST(code);
+      if (runFuzzing) validateSecureAST(fuzzCode);
+      if (runMonteCarlo) validateSecureAST(monteCarloCode);
     } catch (err: any) {
-      return res.json({ success: false, error: 'Syntax error: ' + err.message });
+      return res.json({ success: false, error: 'Syntax/Security error: ' + err.message });
     }
 
     // 2. Build a locked-down sandbox
