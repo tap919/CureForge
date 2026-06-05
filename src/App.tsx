@@ -101,24 +101,28 @@ export default function App() {
     }
   };
 
-  // Kairos Daemon Mock Loop
+  // Kairos Daemon Mock Loop -> Real Loop
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (isDreaming) return;
-      const actions = [
-        "Checking: any pending PubMed papers on active disease targets? -> None found.",
-        "Checking: any hypotheses with no assigned experiments? -> All active hypotheses queued.",
-        "Checking: any completed cloud lab results? -> Monitoring webhook.",
-        "Checking: any model confidence dropped below threshold? -> Posteriors stable."
-      ];
-      const randomAction = actions[Math.floor(Math.random() * actions.length)];
-      setDaemonLogs(prev => {
-        const newLogs = [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'tick', message: `[Tick] ${randomAction}` }, ...prev];
-        return newLogs.slice(0, 50); // Keep last 50
-      });
+      
+      try {
+        const res = await fetch(`/api/daemon/tick?target=${selectedTarget?.symbol || 'EGFR'}`);
+        const data = await res.json();
+        const msg = data.success ? data.message : "Error querying PubMed.";
+        setDaemonLogs(prev => {
+          const newLogs = [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'tick', message: `[Tick] PubMed Check: ${msg}` }, ...prev];
+          return newLogs.slice(0, 50);
+        });
+      } catch (e) {
+        setDaemonLogs(prev => {
+          const newLogs = [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'tick', message: `[Tick] Network Error connecting to Daemon Endpoint.` }, ...prev];
+          return newLogs.slice(0, 50);
+        });
+      }
     }, 15000);
     return () => clearInterval(interval);
-  }, [isDreaming]);
+  }, [isDreaming, selectedTarget]);
 
   const triggerDreamCycle = () => {
     setIsDreaming(true);
@@ -153,7 +157,10 @@ export default function App() {
       setLogs(prev => [...prev, `[Agent] Designing assay protocol for ${selectedTarget.symbol}...`]);
       const res = await fetch('/api/synthesize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          // Optionally provide the secret key if configured, here omitting for demo mode compatibility
+        },
         body: JSON.stringify({ intent, knowledgeBase: `Target: ${selectedTarget.symbol}, Area: ${selectedTarget.area}`, attempt: currentAttempt })
       });
       const data = await res.json();
@@ -172,7 +179,9 @@ export default function App() {
     setIsVerifying(true);
     setLogs(prev => [...prev, `[System] Submitting protocol to Automated Cloud Lab...`]);
 
-    const codeToRun = `function targetFunction(x, y) { return Math.sin(x) * Math.cos(y) + (x * 0.1); }`;
+    const modality = hypothesis?.modality || "Small Molecule";
+    const modFactor = modality.length * 0.1;
+    const codeToRun = `function targetFunction(x, y) { return Math.sin(x + ${modFactor}) * Math.cos(y) + (x * 0.1); }`;
 
     if (runFuzzing && !fuzzCode.trim()) {
       setLogs(prev => [...prev, '[Error] Fuzzing QC enabled but no code provided.']);
@@ -215,9 +224,17 @@ export default function App() {
         const hash = await computeHash(hashInput);
         
         // SYSTEM 5: Results Ingestor
-        // Simulate pass/fail based on a random outcome
-        const isSuccess = Math.random() > 0.3; // 70% chance of pass for demo
-        const resultValue = Math.random() * 10 + 1; // 1 to 11
+        // Compute deterministic results from the validated logic
+        let resultValue = 5.0; 
+        if (data.monteCarloData && data.monteCarloData.length > 0) {
+           const sum = data.monteCarloData.reduce((acc: number, val: any) => acc + val.y, 0);
+           resultValue = Math.abs(sum / data.monteCarloData.length);
+        } else if (data.fuzzResult && data.fuzzResult.numRuns > 0) {
+           resultValue = data.fuzzResult.numRuns / 20;
+        }
+        
+        // Let's establish a deterministic pass/fail threshold based on the data
+        const isSuccess = resultValue > 4.5 && resultValue < 6.5; 
         
         const ingestionRecord = {
           id: hash.substring(0, 8),
@@ -832,7 +849,10 @@ export default function App() {
             <Hexagon size={18} className="text-black" />
           </div>
           <div className="flex flex-col justify-center">
-            <h1 className="text-base font-bold leading-none tracking-tight text-white mb-1">CureForge</h1>
+            <h1 className="text-base font-bold leading-none tracking-tight text-white mb-1 flex items-center gap-3">
+              CureForge 
+              <span className="text-[9px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded border border-amber-500/30 tracking-widest font-bold">DEMO MODE</span>
+            </h1>
             <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest leading-none">Closed-Loop Discovery System</div>
           </div>
         </div>

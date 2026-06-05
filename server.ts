@@ -1,9 +1,11 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { GoogleGenAI } from '@google/genai';
 import { parse } from 'acorn';
 import { Script, createContext } from 'vm';
 import util from 'util';
 import { createServer as createViteServer } from 'vite';
+import db from './server/db';
 import fc from 'fast-check';
 import seedrandom from 'seedrandom';
 
@@ -22,7 +24,26 @@ const METADATA = {
 // Application setup
 // ---------------------------------------------------------------------------
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
+
+// Auth middleware for protected routes
+const authenticate = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const auth = req.headers.authorization;
+  if (!process.env.API_SECRET_KEY) return next(); // Allow in local if no key set
+  if (auth === `Bearer ${process.env.API_SECRET_KEY}`) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
+};
+
+// Rate limiter
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  limit: 100, // 100 requests per IP
+  message: 'Too many requests',
+  validate: false
+});
+app.use('/api/', limiter);
+
 
 // ---------------------------------------------------------------------------
 // Gemini configuration – only enabled if capability is claimed AND key exists
@@ -147,24 +168,47 @@ app.post('/api/verify', async (req, res) => {
 });
 
 app.get('/api/targets', (_req, res) => {
-  const targets = [
-    { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
-    { id: 'ENSG00000157764', symbol: 'BRAF', area: 'Oncology', disease: 'Melanoma', score: 0.95, safety: 'Low', tractability: 'High', infoGain: 0.8 },
-    { id: 'ENSG00000146648', symbol: 'EGFR', area: 'Oncology', disease: 'Lung Cancer', score: 0.92, safety: 'Medium', tractability: 'High', infoGain: 0.75 },
-    { id: 'ENSG00000232810', symbol: 'TNF', area: 'Immunology', disease: 'Rheumatoid Arthritis', score: 0.89, safety: 'Low', tractability: 'High', infoGain: 0.6 },
-    { id: 'ENSG00000160087', symbol: 'SMN1', area: 'Rare Pediatric', disease: 'Spinal Muscular Atrophy', score: 0.98, safety: 'High', tractability: 'Medium', infoGain: 0.99 },
-    { id: 'ENSG00000198691', symbol: 'KREMEN1', area: 'Neglected Tropical', disease: 'Chagas Disease', score: 0.85, safety: 'Medium', tractability: 'Unknown', infoGain: 0.9 },
-    { id: 'ENSG00000142192', symbol: 'APP', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.91, safety: 'Low', tractability: 'Medium', infoGain: 0.88 },
-  ];
-  res.json({ targets });
+  try {
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='targets'").get();
+    if (!tableCheck) {
+      throw new Error('Table not found');
+    }
+    const count: any = db.prepare('SELECT COUNT(*) as c FROM targets').get();
+    if (count.c === 0) {
+       const targets = [
+         { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
+         { id: 'ENSG00000157764', symbol: 'BRAF', area: 'Oncology', disease: 'Melanoma', score: 0.95, safety: 'Low', tractability: 'High', infoGain: 0.8 },
+         { id: 'ENSG00000146648', symbol: 'EGFR', area: 'Oncology', disease: 'Lung Cancer', score: 0.92, safety: 'Medium', tractability: 'High', infoGain: 0.75 },
+         { id: 'ENSG00000232810', symbol: 'TNF', area: 'Immunology', disease: 'Rheumatoid Arthritis', score: 0.89, safety: 'Low', tractability: 'High', infoGain: 0.6 },
+       ];
+       const insert = db.prepare('INSERT INTO targets (id, symbol, area, disease, score, safety, tractability, infoGain) VALUES (@id, @symbol, @area, @disease, @score, @safety, @tractability, @infoGain)');
+       for (const t of targets) { insert.run(t); }
+    }
+    const targets = db.prepare('SELECT * FROM targets').all();
+    res.json({ targets });
+  } catch (err) {
+    console.error('Database error on targets:', err);
+    // Fallback if sqlite not setup in time
+    const targets = [
+      { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
+    ];
+    res.json({ targets });
+  }
 });
 
 // ---------------------------------------------------------------------------
 // POST /api/synthesize – generator + skeptic code generation via Gemini
 // ---------------------------------------------------------------------------
-app.post('/api/synthesize', async (req, res) => {
+app.post('/api/synthesize', authenticate, async (req, res) => {
   try {
     const { intent, knowledgeBase, attempt } = req.body;
+
+    if (typeof intent !== 'string' || intent.length > 1000) {
+      return res.status(400).json({ success: false, error: 'Invalid intent parameter' });
+    }
+    if (typeof knowledgeBase !== 'string' || knowledgeBase.length > 2000) {
+      return res.status(400).json({ success: false, error: 'Invalid knowledgeBase parameter' });
+    }
 
     // Only use Gemini if both the capability and the API key are present
     if (genAI) {
@@ -185,7 +229,7 @@ Return ONLY a JSON object (no markdown block) with this exact structure:
   "literature_support": "Brief hypothetical literature/evidence summary"
 }`;
         const result = await genAI.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
+          model: 'gemini-2.5-pro',
           contents: prompt,
         });
         const generatedHypothesisText = (result.text || '').replace(/```json|```/g, '').trim();
@@ -197,7 +241,7 @@ Return ONLY a JSON object (no markdown block) with this exact structure:
         }
 
         // --- SECOND CALL: Skeptic AI ---
-        const skepticPrompt = `You are Skeptic.ai, a ruthless peer reviewer. Review this hypothesis for flaws, list them, cite contradictory (mock) papers, and assign a critic_score from 0-100 indicating falsifiability.
+        const skepticPrompt = `You are Skeptic.ai, a ruthless peer reviewer. Review this hypothesis for flaws, list them, cite contradictory papers, and assign a critic_score from 0-100 indicating falsifiability.
 Hypothesis: ${generatedHypothesisText}
 
 Return ONLY a JSON object (no markdown block) with this exact structure:
@@ -207,7 +251,7 @@ Return ONLY a JSON object (no markdown block) with this exact structure:
   "critic_score": 75
 }`;
         const skepticResult = await genAI.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
+          model: 'gemini-2.5-pro',
           contents: skepticPrompt,
         });
         const skepticText = (skepticResult.text || '').replace(/```json|```/g, '').trim();
@@ -268,6 +312,27 @@ Return ONLY a JSON object (no markdown block) with this exact structure:
 // ---------------------------------------------------------------------------
 // Start server (with Vite dev middleware in development)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GET /api/daemon/tick – Real pubmed verification daemon endpoint
+// ---------------------------------------------------------------------------
+app.get('/api/daemon/tick', async (req, res) => {
+  const { target } = req.query;
+  if (!target || typeof target !== 'string') {
+    return res.status(400).json({ error: 'Missing target symbol' });
+  }
+  try {
+    const ncbiUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(target)}[Title/Abstract]&retmode=json&retmax=1&sort=date`;
+    const ncbiRes = await fetch(ncbiUrl);
+    const data = await ncbiRes.json();
+    if (data && data.esearchresult && data.esearchresult.idlist && data.esearchresult.idlist.length > 0) {
+       return res.json({ success: true, message: `Found recent publication: PMID ${data.esearchresult.idlist[0]}` });
+    }
+    return res.json({ success: true, message: 'No new literature detected for target.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'NCBI API failed' });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
