@@ -4,6 +4,17 @@ import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library
 import { Visualizer } from './Visualizer';
 import { calculatePosterior } from './lib/bayes';
 
+const API_KEY = import.meta.env.VITE_API_SECRET_KEY || '';
+const apiFetch = (url: string, options: RequestInit = {}) =>
+  fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+      ...options.headers,
+    },
+  });
+
 const DEFAULT_FUZZ_CODE = `// fast-check property QC: Validating assay readout stability
 result = fc.check(
   fc.property(fc.float(-10, 10), fc.float(-10, 10), (x, y) => {
@@ -39,7 +50,7 @@ export default function App() {
   const [selectedTarget, setSelectedTarget] = useState<TargetType>(DEFAULT_TARGET);
 
   useEffect(() => {
-    fetch('/api/targets')
+    apiFetch('/api/targets')
       .then(r => r.json())
       .then(data => {
         if (data.targets && data.targets.length > 0) {
@@ -90,7 +101,7 @@ export default function App() {
       
       const doIngest = async () => {
          try {
-           const res = await fetch('/api/ingest', {
+           const res = await apiFetch('/api/ingest', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
              body: JSON.stringify({ fileName: file.name, target: targets[0]?.symbol || 'UNKNOWN' })
@@ -105,7 +116,7 @@ export default function App() {
                 const newTargets = [...prev];
                 const updatedTarget = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + data.scoreBoost) };
                 newTargets[0] = updatedTarget;
-                fetch(`/api/targets/${updatedTarget.id}`, {
+                apiFetch(`/api/targets/${updatedTarget.id}`, {
                    method: 'PATCH',
                    headers: { 'Content-Type': 'application/json' },
                    body: JSON.stringify({ score: updatedTarget.score })
@@ -128,7 +139,7 @@ export default function App() {
       if (isDreaming) return;
       
       try {
-        const res = await fetch(`/api/daemon/tick?target=${selectedTarget?.symbol || 'EGFR'}`);
+        const res = await apiFetch(`/api/daemon/tick?target=${selectedTarget?.symbol || 'EGFR'}`);
         const data = await res.json();
         const msg = data.success ? data.message : "Error querying PubMed.";
         setDaemonLogs(prev => {
@@ -176,7 +187,7 @@ export default function App() {
   const handleSynthesize = async () => {
     try {
       setLogs(prev => [...prev, `[Agent] Designing assay protocol for ${selectedTarget.symbol}...`]);
-      const res = await fetch('/api/synthesize', {
+      const res = await apiFetch('/api/synthesize', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -216,7 +227,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/verify', {
+      const res = await apiFetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -278,18 +289,20 @@ export default function App() {
         // SYSTEM 6: Bayesian Updater
         let pD_H = undefined;
         let pD_notH = undefined;
+        let newConfidence = 50;
         try {
-           const bayesRes = await fetch(`/api/bayes/evidence?target=${selectedTarget.symbol}`);
+           const bayesRes = await apiFetch(`/api/bayes/evidence?target=${selectedTarget.symbol}&prior=${hypothesis?.confidence || 50}&isSuccess=${isSuccess}`);
            const bayesData = await bayesRes.json();
            if (bayesData.pD_H) pD_H = bayesData.pD_H;
            if (bayesData.pD_notH) pD_notH = bayesData.pD_notH;
-           if (!isSuccess) {
-              pD_H = 1 - pD_H;
-              pD_notH = 1 - pD_notH;
+           if (bayesData.posterior !== undefined) {
+             newConfidence = bayesData.posterior;
+           } else {
+             newConfidence = 50; // fallback if server couldn't calculate
            }
-        } catch (e) { console.warn('Bayes evidence fetch failed'); }
-
-        const newConfidence = calculatePosterior(selectedTarget.score * 100, isSuccess, pD_H, pD_notH);
+        } catch (e) {
+             newConfidence = 50; 
+        }
 
         const scoreDelta = isSuccess ? 0.05 : -0.05;
         const newScore = Math.min(1, Math.max(0, selectedTarget.score + scoreDelta));
@@ -299,7 +312,7 @@ export default function App() {
         ).sort((a, b) => b.score - a.score));
 
         // Persist score back to DB
-        fetch(`/api/targets/${selectedTarget.id}`, {
+        apiFetch(`/api/targets/${selectedTarget.id}`, {
            method: 'PATCH',
            headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ score: newScore })
@@ -799,7 +812,7 @@ export default function App() {
     setIsRunningRetrospectives(true);
     setRetrospectiveResults([]);
     try {
-      const res = await fetch('/api/retrospective');
+      const res = await apiFetch('/api/retrospective');
       const data = await res.json();
       if (data.results) {
          setRetrospectiveResults(data.results);

@@ -24,7 +24,7 @@ router.get('/tick', authenticate, async (req, res) => {
          const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmid}&retmode=text&rettype=abstract`;
          const abstractRes = await fetch(efetchUrl);
          const abstractText = await abstractRes.text();
-         const shortAbstract = abstractText.substring(0, 100).replace(/\n/g, ' ') + '...';
+         const shortAbstract = abstractText.substring(0, 100).replace(/\n/g, ' ').replace(/[<>""'`]/g, '') + '...';
          return res.json({ success: true, message: `New PMID ${pmid}: ${shortAbstract}` });
        } catch (err) {
          return res.json({ success: true, message: `Found recent publication: PMID ${pmid}` });

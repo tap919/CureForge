@@ -38,7 +38,7 @@ router.post('/', authenticate, async (req, res) => {
       }
     } else if (ext === 'fasta') {
       message = `Parsed FASTA sequence. (Simulated BLAST homology search - API integration pending).`;
-      scoreBoost = 0.04;
+      scoreBoost = 0;
     } else if (ext === 'pdf') {
        try {
          const semanticScholarUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(target)}&limit=1&fields=title,year,citationCount`;

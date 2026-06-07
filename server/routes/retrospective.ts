@@ -13,10 +13,7 @@ router.get('/', authenticate, async (req, res) => {
      { name: 'Imatinib (BCR-ABL)', status: 'success', prediction: 'Clean kinase profile, high efficacy', confidence: 0.94 }
   ];
 
-  // Simulate heavy computation delay
-  setTimeout(() => {
-    res.json({ results, is_demo_fixture: true });
-  }, 1500);
+  res.json({ results, is_demo_fixture: true });
 });
 
 export default router;

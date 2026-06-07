@@ -4,7 +4,7 @@ import { authenticate } from '../middlewares/auth';
 
 const router = express.Router();
 
-router.get('/', (_req, res) => {
+router.get('/', authenticate, (_req, res) => {
   try {
     const targets = db.prepare('SELECT * FROM targets').all();
     res.json({ targets });

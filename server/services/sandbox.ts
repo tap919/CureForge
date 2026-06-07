@@ -23,8 +23,10 @@ export function validateSecureAST(source: string) {
   const ast = parse(source, { ecmaVersion: 2024, sourceType: 'script' });
   const forbidden = ["process", "require", "constructor", "__proto__", "eval", "global", "globalThis", "fs", "child_process", "worker_threads"];
 
+  const visited = new Set<any>();
   function walk(node: any) {
-    if (!node) return;
+    if (!node || typeof node !== 'object' || visited.has(node)) return;
+    visited.add(node);
     if (node.type === 'Identifier' && forbidden.includes(node.name)) {
       throw new Error(`Security Violation: Use of forbidden identifier: ${node.name}`);
     }

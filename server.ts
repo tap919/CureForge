@@ -1,6 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { createServer as createViteServer } from 'vite';
+import helmet from 'helmet';
+import cors from 'cors';
 import { METADATA } from './server/metadata';
 import targetRoutes from './server/routes/targets';
 import verifyRoutes from './server/routes/verify';
@@ -14,7 +15,12 @@ import { authenticate } from './server/middlewares/auth';
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json());
+
+app.use(helmet({
+  contentSecurityPolicy: false, 
+}));
+app.use(cors({ origin: process.env.APP_URL || 'http://localhost:3000', credentials: true }));
+app.use(express.json({ limit: '100kb' }));
 
 // Main general rate limiter
 const limiter = rateLimit({
@@ -29,9 +35,12 @@ app.get('/api/config', authenticate, (_req, res) => {
   res.json(METADATA);
 });
 
+const sandboxLimiter = rateLimit({ windowMs: 60_000, limit: 10, message: 'Sandbox rate limit exceeded' });
+const aiLimiter = rateLimit({ windowMs: 60_000, limit: 5, message: 'AI synthesis rate limit exceeded' });
+
 app.use('/api/targets', targetRoutes);
-app.use('/api/verify', verifyRoutes);
-app.use('/api/synthesize', synthesizeRoutes);
+app.use('/api/verify', sandboxLimiter, verifyRoutes);
+app.use('/api/synthesize', aiLimiter, synthesizeRoutes);
 app.use('/api/daemon', daemonRoutes);
 app.use('/api/bayes', bayesRoutes);
 app.use('/api/ingest', ingestRoutes);
@@ -48,6 +57,7 @@ async function startServer() {
 
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

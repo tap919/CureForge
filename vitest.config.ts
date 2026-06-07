@@ -5,5 +5,13 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     exclude: ['node_modules', 'dist'],
     environment: 'node',
+    coverage: {
+      provider: 'v8',
+      thresholds: {
+        lines: 50,
+        functions: 50,
+        branches: 50
+      }
+    }
   },
 });

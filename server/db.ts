@@ -1,6 +1,12 @@
 import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const db = new Database('cureforge.db');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'cureforge.db');
+const db = new Database(dbPath);
 
 // Initialize schema
 db.exec(`
@@ -32,9 +38,10 @@ export async function seedDatabase() {
   const count = db.prepare('SELECT COUNT(*) as c FROM targets').get() as { c: number };
   if (count.c === 0) {
     try {
+      const efoId = process.env.SEED_EFO_ID || "EFO_0000616";
       const query = `
         query {
-          disease(efoId: "EFO_0000616") {
+          disease(efoId: "${efoId}") {
             associatedTargets(page: {index: 0, size: 5}) {
               rows {
                 target {
