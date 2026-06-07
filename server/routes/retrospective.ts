@@ -15,7 +15,7 @@ router.get('/', authenticate, async (req, res) => {
 
   // Simulate heavy computation delay
   setTimeout(() => {
-    res.json({ results });
+    res.json({ results, is_demo_fixture: true });
   }, 1500);
 });
 

@@ -21,13 +21,24 @@ export function validateSecureAST(source: string) {
   }
 
   const ast = parse(source, { ecmaVersion: 2024, sourceType: 'script' });
-  const astJson = JSON.stringify(ast);
   const forbidden = ["process", "require", "constructor", "__proto__", "eval", "global", "globalThis", "fs", "child_process", "worker_threads"];
-  for (const word of forbidden) {
-    if (astJson.includes(`"name":"${word}"`) || astJson.includes(`"value":"${word}"`)) {
-      throw new Error(`Security Violation: Use of forbidden identifier or string: ${word}`);
+
+  function walk(node: any) {
+    if (!node) return;
+    if (node.type === 'Identifier' && forbidden.includes(node.name)) {
+      throw new Error(`Security Violation: Use of forbidden identifier: ${node.name}`);
+    }
+    if (node.type === 'Literal' && typeof node.value === 'string' && forbidden.includes(node.value)) {
+      throw new Error(`Security Violation: Use of forbidden string: ${node.value}`);
+    }
+    for (const key in node) {
+      if (node[key] && typeof node[key] === 'object') {
+        walk(node[key]);
+      }
     }
   }
+
+  walk(ast);
 }
 
 export async function runInSubprocess(code: string, timeoutMs: number = 3000): Promise<SandboxResult> {
@@ -70,8 +81,6 @@ export async function runInSubprocess(code: string, timeoutMs: number = 3000): P
       cwd: process.cwd(), // ensure it resolves project node_modules
     });
     
-    await fs.unlink(filePath).catch(() => {});
-    
     try {
       const parsed = JSON.parse(stdout.trim());
       if (parsed.success) {
@@ -83,10 +92,11 @@ export async function runInSubprocess(code: string, timeoutMs: number = 3000): P
       return { failed: true, error: 'Could not parse sandbox output', trace: [stdout.substring(0, 100)] };
     }
   } catch (err: any) {
-    await fs.unlink(filePath).catch(() => {});
     if (err.killed) {
       return { failed: true, error: 'Execution timed out', trace: [] };
     }
     return { failed: true, error: err.message, trace: [] };
+  } finally {
+    await fs.unlink(filePath).catch(() => {});
   }
 }

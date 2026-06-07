@@ -18,12 +18,18 @@ router.post('/', authenticate, async (req, res) => {
 
     if (ext === 'pdb' || ext === 'cif') {
       try {
-        const pdbId = fileName.substring(0, 4); // naive extraction
-        const pdbRes = await fetch(`https://data.rcsb.org/rest/v1/core/entry/${pdbId}`);
-        if (pdbRes.ok) {
-          const pdbData = await pdbRes.json();
-          message = `Extracted 3D structure details: ${pdbData.struct?.title || 'Unknown structure'} (${pdbData.exptl?.[0]?.method || 'Experimental'})`;
-          scoreBoost = 0.03;
+        const match = fileName.match(/([a-zA-Z0-9]{4})\.(pdb|cif)$/i);
+        const pdbId = match ? match[1] : null;
+
+        if (pdbId) {
+          const pdbRes = await fetch(`https://data.rcsb.org/rest/v1/core/entry/${pdbId}`);
+          if (pdbRes.ok) {
+            const pdbData = await pdbRes.json();
+            message = `Extracted 3D structure details: ${pdbData.struct?.title || 'Unknown structure'} (${pdbData.exptl?.[0]?.method || 'Experimental'})`;
+            scoreBoost = 0.03;
+          } else {
+            message = 'Processed PDB structure coordinates and active site topology.';
+          }
         } else {
           message = 'Processed PDB structure coordinates and active site topology.';
         }
@@ -31,7 +37,7 @@ router.post('/', authenticate, async (req, res) => {
         message = 'Processed PDB structure coordinates and active site topology.';
       }
     } else if (ext === 'fasta') {
-      message = `Simulated async BLAST homology search for ${target}. Identified 3 conserved domains.`;
+      message = `Parsed FASTA sequence. (Simulated BLAST homology search - API integration pending).`;
       scoreBoost = 0.04;
     } else if (ext === 'pdf') {
        try {

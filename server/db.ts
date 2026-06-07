@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-const db = new Database(':memory:');
+const db = new Database('cureforge.db');
 
 // Initialize schema
 db.exec(`

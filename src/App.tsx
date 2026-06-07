@@ -819,7 +819,10 @@ export default function App() {
            Retrospective Benchmarks
         </h2>
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6">
-           <p className="text-zinc-400 mb-6">Evaluating CureForge's target prioritization against historical clinical successes and failures. This grounds the pipeline's Bayesian framework in real-world outcomes.</p>
+           <p className="text-zinc-400 mb-6 flex items-center justify-between">
+             <span>Evaluating CureForge's target prioritization against historical clinical successes and failures. This grounds the pipeline's Bayesian framework in real-world outcomes.</span>
+             {retrospectiveResults.length > 0 && <span className="ml-4 px-2 py-1 bg-zinc-800 text-zinc-500 rounded text-xs whitespace-nowrap uppercase tracking-widest font-bold">Demo Fixture</span>}
+           </p>
            
            <div className="space-y-4">
               {retrospectiveResults.length === 0 && !isRunningRetrospectives && (

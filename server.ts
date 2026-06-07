@@ -10,6 +10,7 @@ import bayesRoutes from './server/routes/bayes';
 import ingestRoutes from './server/routes/ingest';
 import retrospectiveRoutes from './server/routes/retrospective';
 import { seedDatabase } from './server/db';
+import { authenticate } from './server/middlewares/auth';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -24,7 +25,7 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Register routes
-app.get('/api/config', (_req, res) => {
+app.get('/api/config', authenticate, (_req, res) => {
   res.json(METADATA);
 });
 
