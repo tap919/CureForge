@@ -1,354 +1,51 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { GoogleGenAI } from '@google/genai';
-import { parse } from 'acorn';
-import { Script, createContext } from 'vm';
-import util from 'util';
 import { createServer as createViteServer } from 'vite';
-import db from './server/db';
-import fc from 'fast-check';
-import seedrandom from 'seedrandom';
+import { METADATA } from './server/metadata';
+import targetRoutes from './server/routes/targets';
+import verifyRoutes from './server/routes/verify';
+import synthesizeRoutes from './server/routes/synthesize';
+import daemonRoutes from './server/routes/daemon';
+import bayesRoutes from './server/routes/bayes';
+import ingestRoutes from './server/routes/ingest';
+import retrospectiveRoutes from './server/routes/retrospective';
+import { seedDatabase } from './server/db';
 
-// ---------------------------------------------------------------------------
-// CureForge platform metadata – single source of truth
-// ---------------------------------------------------------------------------
-const METADATA = {
-  name: 'CureForge',
-  description:
-    'Unified platform with autonomous, cure-directed AI agents powered by SciNet. Multi-agent systems for biomedicine.',
-  requestFramePermissions: [],
-  majorCapabilities: ['MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API'],
-};
-
-// ---------------------------------------------------------------------------
-// Application setup
-// ---------------------------------------------------------------------------
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json());
 
-// Auth middleware for protected routes
-const authenticate = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const auth = req.headers.authorization;
-  if (!process.env.API_SECRET_KEY) return next(); // Allow in local if no key set
-  if (auth === `Bearer ${process.env.API_SECRET_KEY}`) return next();
-  return res.status(401).json({ error: 'Unauthorized' });
-};
-
-// Rate limiter
+// Main general rate limiter
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  limit: 100, // 100 requests per IP
-  message: 'Too many requests',
-  validate: false
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  message: 'Too many requests'
 });
 app.use('/api/', limiter);
 
-
-// ---------------------------------------------------------------------------
-// Gemini configuration – only enabled if capability is claimed AND key exists
-// ---------------------------------------------------------------------------
-const GEMINI_CAPABILITY = METADATA.majorCapabilities.includes(
-  'MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API'
-);
-const genAI =
-  GEMINI_CAPABILITY && process.env.GOOGLE_API_KEY
-    ? new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY })
-    : null;
-
-// ---------------------------------------------------------------------------
-// Public config endpoint – exposes CureForge identity to the frontend
-// ---------------------------------------------------------------------------
+// Register routes
 app.get('/api/config', (_req, res) => {
   res.json(METADATA);
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/verify – syntax check, safe execution, fuzzing, Monte Carlo
-// ---------------------------------------------------------------------------
-app.post('/api/verify', async (req, res) => {
-  try {
-    const {
-      code,
-      spec,
-      knowledgeBase,
-      attempt,
-      runMonteCarlo = false,
-      runFuzzing = false,
-      fuzzCode,        // user-provided fast-check test (sets sandbox.result)
-      monteCarloCode,  // user-provided Monte Carlo code (sets sandbox.result)
-    } = req.body;
-
-    // 1. Syntax & Security validation with Acorn
-    try {
-      const validateSecureAST = (source: string) => {
-        if (!source) return;
-        const ast = parse(source, { ecmaVersion: 2024, sourceType: 'script' });
-        const astJson = JSON.stringify(ast);
-        const forbidden = ["process", "require", "constructor", "__proto__", "eval", "global", "globalThis"];
-        for (const word of forbidden) {
-          if (astJson.includes(`"name":"${word}"`) || astJson.includes(`"value":"${word}"`)) {
-            throw new Error(`Security Violation: Use of forbidden identifier or string: ${word}`);
-          }
-        }
-      };
-
-      validateSecureAST(code);
-      if (runFuzzing) validateSecureAST(fuzzCode);
-      if (runMonteCarlo) validateSecureAST(monteCarloCode);
-    } catch (err: any) {
-      return res.json({ success: false, error: 'Syntax/Security error: ' + err.message });
-    }
-
-    // 2. Build a locked-down sandbox
-    const trace: string[] = [];
-    const sandbox = {
-      // Safe console – captures logs into the trace array
-      console: {
-        log: (...args: any[]) =>
-          trace.push(args.map(a => util.format(a)).join(' ')),
-        warn: (...args: any[]) =>
-          trace.push('[warn] ' + args.map(a => util.format(a)).join(' ')),
-        error: (...args: any[]) =>
-          trace.push('[error] ' + args.map(a => util.format(a)).join(' ')),
-      },
-      assert: util.isDeepStrictEqual,
-      fc,
-      seedrandom,
-      // No require, process, or other dangerous globals
-      result: null,
-    };
-    const context = createContext(sandbox);
-
-    // 3. Execute user code to define functions / objects
-    try {
-      const userScript = new Script(code);
-      userScript.runInContext(context, { timeout: 2000 });
-      trace.push('Syntax verified; code loaded into sandbox.');
-    } catch (err: any) {
-      return res.json({
-        success: false,
-        error: 'Execution error: ' + err.message,
-        trace,
-      });
-    }
-
-    // 4. Optional fuzzing (fast-check)
-    let fuzzResult: any = null;
-    if (runFuzzing && fuzzCode) {
-      try {
-        const fuzzScript = new Script(fuzzCode);
-        fuzzScript.runInContext(context, { timeout: 3000 });
-        fuzzResult = context.result;
-        trace.push('Fuzzing completed.');
-      } catch (err: any) {
-        fuzzResult = { failed: true, error: err.message };
-        trace.push('Fuzzing failed: ' + err.message);
-      }
-    }
-
-    // 5. Optional Monte Carlo simulation
-    let monteCarloData: any[] = [];
-    if (runMonteCarlo && monteCarloCode) {
-      try {
-        const mcScript = new Script(monteCarloCode);
-        mcScript.runInContext(context, { timeout: 5000 });
-        monteCarloData = context.result;
-        trace.push('Monte Carlo simulation completed.');
-      } catch (err: any) {
-        trace.push('Monte Carlo failed: ' + err.message);
-      }
-    }
-
-    res.json({ success: true, trace, fuzzResult, monteCarloData });
-  } catch (error) {
-    console.error('Verification endpoint error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
-  }
-});
-
-app.get('/api/targets', (_req, res) => {
-  try {
-    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='targets'").get();
-    if (!tableCheck) {
-      throw new Error('Table not found');
-    }
-    const count: any = db.prepare('SELECT COUNT(*) as c FROM targets').get();
-    if (count.c === 0) {
-       const targets = [
-         { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
-         { id: 'ENSG00000157764', symbol: 'BRAF', area: 'Oncology', disease: 'Melanoma', score: 0.95, safety: 'Low', tractability: 'High', infoGain: 0.8 },
-         { id: 'ENSG00000146648', symbol: 'EGFR', area: 'Oncology', disease: 'Lung Cancer', score: 0.92, safety: 'Medium', tractability: 'High', infoGain: 0.75 },
-         { id: 'ENSG00000232810', symbol: 'TNF', area: 'Immunology', disease: 'Rheumatoid Arthritis', score: 0.89, safety: 'Low', tractability: 'High', infoGain: 0.6 },
-       ];
-       const insert = db.prepare('INSERT INTO targets (id, symbol, area, disease, score, safety, tractability, infoGain) VALUES (@id, @symbol, @area, @disease, @score, @safety, @tractability, @infoGain)');
-       for (const t of targets) { insert.run(t); }
-    }
-    const targets = db.prepare('SELECT * FROM targets').all();
-    res.json({ targets });
-  } catch (err) {
-    console.error('Database error on targets:', err);
-    // Fallback if sqlite not setup in time
-    const targets = [
-      { id: 'ENSG00000130203', symbol: 'APOE', area: 'Neurodegeneration', disease: "Alzheimer's Disease", score: 0.96, safety: 'Medium', tractability: 'Low', infoGain: 0.95 },
-    ];
-    res.json({ targets });
-  }
-});
-
-app.patch('/api/targets/:id', authenticate, (req, res) => {
-  try {
-    const { id } = req.params;
-    const { score } = req.body;
-    if (typeof score !== 'number') {
-      return res.status(400).json({ error: 'Invalid score' });
-    }
-    db.prepare('UPDATE targets SET score = @score WHERE id = @id').run({ id, score });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Failed to update target:', err);
-    res.status(500).json({ error: 'Database error' });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/synthesize – generator + skeptic code generation via Gemini
-// ---------------------------------------------------------------------------
-app.post('/api/synthesize', authenticate, async (req, res) => {
-  try {
-    const { intent, knowledgeBase, attempt } = req.body;
-
-    if (typeof intent !== 'string' || intent.length > 1000) {
-      return res.status(400).json({ success: false, error: 'Invalid intent parameter' });
-    }
-    if (typeof knowledgeBase !== 'string' || knowledgeBase.length > 2000) {
-      return res.status(400).json({ success: false, error: 'Invalid knowledgeBase parameter' });
-    }
-
-    // Only use Gemini if both the capability and the API key are present
-    if (genAI) {
-      try {
-        const prompt = `You are the Hypothesis Engine for CureForge. Formulate a testable biomedical intervention.
-Generate a structured biomedical hypothesis based on the following context.
-Intent: ${intent}
-Context: ${knowledgeBase}
-
-Return ONLY a JSON object (no markdown block) with this exact structure:
-{
-  "target": "Gene/Protein symbol",
-  "mechanism": "Biological reasoning in 2-3 sentences",
-  "modality": "Small molecule, Biologic, Gene therapy, etc.",
-  "proposed_intervention": "Proposed drug or mechanism of action",
-  "testable_prediction": "Expected biomarker or functional outcome",
-  "confidence": 85,
-  "literature_support": "Brief hypothetical literature/evidence summary"
-}`;
-        const result = await genAI.models.generateContent({
-          model: 'gemini-2.5-pro',
-          contents: prompt,
-        });
-        const generatedHypothesisText = (result.text || '').replace(/```json|```/g, '').trim();
-        let hypothesis;
-        try {
-          hypothesis = JSON.parse(generatedHypothesisText);
-        } catch(e) {
-          throw new Error('Failed to parse Hypothesis JSON');
-        }
-
-        // --- SECOND CALL: Skeptic AI ---
-        const skepticPrompt = `You are Skeptic.ai, a ruthless peer reviewer. Review this hypothesis for flaws, list them, cite contradictory papers, and assign a critic_score from 0-100 indicating falsifiability.
-Hypothesis: ${generatedHypothesisText}
-
-Return ONLY a JSON object (no markdown block) with this exact structure:
-{
-  "flaws": ["Flaw 1", "Flaw 2"],
-  "contradictory_papers": ["Citations..."],
-  "critic_score": 75
-}`;
-        const skepticResult = await genAI.models.generateContent({
-          model: 'gemini-2.5-pro',
-          contents: skepticPrompt,
-        });
-        const skepticText = (skepticResult.text || '').replace(/```json|```/g, '').trim();
-        let skepticObj;
-        try {
-          skepticObj = JSON.parse(skepticText);
-        } catch(e) {
-          throw new Error('Failed to parse Skeptic JSON');
-        }
-
-        // Combine
-        const finalOutput = { ...hypothesis, ...skepticObj };
-
-        return res.json({ success: true, hypothesis: finalOutput });
-      } catch (aiError: any) {
-        console.error('Gemini synthesis failed:', aiError);
-        // Fallback to demo
-        return res.json({
-          success: true,
-          hypothesis: {
-            target: "Fallback",
-            mechanism: "Gemini failed to load or parse.",
-            modality: "N/A",
-            proposed_intervention: "N/A",
-            testable_prediction: "N/A",
-            confidence: 0,
-            literature_support: "N/A",
-            flaws: ["AI failed"],
-            contradictory_papers: ["None"],
-            critic_score: 0
-          }
-        });
-      }
-    }
-
-    // Gemini not available – return a static demo
-    res.json({
-      success: true,
-      hypothesis: {
-        target: "EGFR",
-        mechanism: "Inhibition of EGFR tyrosine kinase domain prevents downstream signaling.",
-        modality: "Small molecule",
-        proposed_intervention: "Type I Tyrosine Kinase Inhibitor",
-        testable_prediction: "Decreased phosphorylation of ERK1/2 in tumor biopsy.",
-        confidence: 90,
-        literature_support: "Multiple phase 3 trials in NSCLC demonstrate efficacy.",
-        flaws: ["Acquired resistance via T790M mutation", "Off-target GI toxicity"],
-        contradictory_papers: ["Smith et al. 2025: Early resistance pathways in EGFR+"],
-        critic_score: 65
-      }
-    });
-  } catch (error) {
-    console.error('Synthesis error:', error);
-    res.status(500).json({ success: false, error: 'Synthesis failed' });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Start server (with Vite dev middleware in development)
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// GET /api/daemon/tick – Real pubmed verification daemon endpoint
-// ---------------------------------------------------------------------------
-app.get('/api/daemon/tick', async (req, res) => {
-  const { target } = req.query;
-  if (!target || typeof target !== 'string') {
-    return res.status(400).json({ error: 'Missing target symbol' });
-  }
-  try {
-    const ncbiUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(target)}[Title/Abstract]&retmode=json&retmax=1&sort=date`;
-    const ncbiRes = await fetch(ncbiUrl);
-    const data = await ncbiRes.json();
-    if (data && data.esearchresult && data.esearchresult.idlist && data.esearchresult.idlist.length > 0) {
-       return res.json({ success: true, message: `Found recent publication: PMID ${data.esearchresult.idlist[0]}` });
-    }
-    return res.json({ success: true, message: 'No new literature detected for target.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: 'NCBI API failed' });
-  }
-});
+app.use('/api/targets', targetRoutes);
+app.use('/api/verify', verifyRoutes);
+app.use('/api/synthesize', synthesizeRoutes);
+app.use('/api/daemon', daemonRoutes);
+app.use('/api/bayes', bayesRoutes);
+app.use('/api/ingest', ingestRoutes);
+app.use('/api/retrospective', retrospectiveRoutes);
 
 async function startServer() {
+  // Run startup tasks
+  try {
+    await seedDatabase();
+    console.log('Database seeded successfully.');
+  } catch (err) {
+    console.error('Failed to seed database:', err);
+  }
+
+  // Vite middleware setup
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -367,4 +64,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VITEST) {
+  startServer();
+}
+
+export { app };

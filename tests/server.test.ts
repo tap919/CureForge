@@ -1,58 +1,59 @@
-import { test, expect, describe } from 'vitest';
+import { test, expect, describe, beforeAll } from 'vitest';
+import request from 'supertest';
+import { app } from '../server';
+import { validateSecureAST, runInSubprocess } from '../server/services/sandbox';
 
-// Placeholder mock functions for the backend verification pipeline
-function compileIRtoJS(ir: any) {
-  if (!ir || !ir.steps) throw new Error("Malformed JSON IR");
-  return `const run = () => { ${ir.steps.map((s: any) => 'console.log("' + s.action + '");').join('\\n')} }; run();`;
-}
-
-function verifyWithAcorn(code: string) {
-  if (code.includes('eval(')) throw new Error("Unsafe operation detected by Acorn AST");
-  return true;
-}
-
-function executeInSandbox(code: string, config: { seed: string }) {
-  if (config.seed !== 'deterministic-seed') {
-    return { status: 'unstable', trace: 'random execution trace' };
-  }
-  return { status: 'success', trace: 'deterministic trace output' };
-}
-
-describe('Structured Synthesis API', () => {
-  test('IR Payload is synthesized as properly schema-constrained JSON', () => {
-    const mockSynthesisPayload = {
-      task_id: "task-123",
-      schema_version: "1.0",
-      steps: [{ action: "parseData", parameters: {} }]
-    };
-    expect(() => compileIRtoJS(mockSynthesisPayload)).not.toThrow();
+describe('Sandbox Security and Validation', () => {
+  test('Backend validation with Acorn blocks unsafe code', () => {
+    const unsafeCode = `const run = () => { eval('console.log(1)'); };`;
+    expect(() => validateSecureAST(unsafeCode)).toThrow("Security Violation");
   });
 
-  test('Malformed Generated Code triggers IR compilation edge case errors', () => {
-    const invalidIR = { missing_steps: true };
-    expect(() => compileIRtoJS(invalidIR)).toThrow("Malformed JSON IR");
+  test('Backend validation allows safe code', () => {
+    const safeCode = `const run = () => { console.log(1); };`;
+    expect(() => validateSecureAST(safeCode)).not.toThrow();
+  });
+
+  test('runInSubprocess evaluates standard code cleanly', async () => {
+    const code = `result = 42;`;
+    const res = await runInSubprocess(code);
+    if (res.failed) console.error("runInSubprocess failed with:", res);
+    expect(res.failed).toBeFalsy();
+    expect(res.data).toBe(42);
   });
 });
 
-describe('/api/verify Sandbox', () => {
-  test('Backend verification with Acorn blocks unsafe code', () => {
-    const unsafeCode = `const run = () => { eval('console.log(1)'); };`;
-    expect(() => verifyWithAcorn(unsafeCode)).toThrow("Unsafe operation detected");
+describe('API Integrations', () => {
+  test('GET /api/config returns metadata', async () => {
+    const response = await request(app).get('/api/config');
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('CureForge');
   });
 
-  test('Deterministic replay behavior and seeded execution', () => {
-    const validCode = `const run = () => { console.log('safe'); }; run();`;
-    verifyWithAcorn(validCode);
-    const result = executeInSandbox(validCode, { seed: 'deterministic-seed' });
-    expect(result.status).toBe('success');
-    expect(result.trace).toContain('deterministic trace');
+  test('POST /api/verify executes code via sandbox route', async () => {
+    const response = await request(app)
+      .post('/api/verify')
+      .send({ code: "result = 99;" });
+      
+    if (response.body.success === false) console.error("verify error", response.body.error);
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    // trace should include sandbox load
+    expect(response.body.trace.join(' ')).toContain('Syntax verified');
+  });
+  
+  test('POST /api/verify rejects dangerous payload', async () => {
+    const response = await request(app)
+      .post('/api/verify')
+      .send({ code: "process.exit(1);" });
+      
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('Syntax/Security error');
   });
 
-  test('Failure traces are cleanly emitted for sandbox evaluation errors', () => {
-    const validCode = `const run = () => { console.log('safe'); }; run();`;
-    verifyWithAcorn(validCode);
-    const result = executeInSandbox(validCode, { seed: 'incorrect-seed' });
-    expect(result.status).toBe('unstable');
-    expect(result.trace).toBe('random execution trace');
+  test('GET /api/daemon/tick is accessible in dev environment without auth', async () => {
+    const response = await request(app).get('/api/daemon/tick?target=APOE');
+    expect(response.status).toBe(200); 
   });
 });

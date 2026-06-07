@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Target as TargetType, Hypothesis, AuditRecord, DaemonLog, UploadedFile, CredibilityEvent, MonteCarloData } from './types';
 import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu, Bot, Brain, MoonStar, Zap, FileText, Target } from 'lucide-react';
 import { Visualizer } from './Visualizer';
+import { calculatePosterior } from './lib/bayes';
 
 const DEFAULT_FUZZ_CODE = `// fast-check property QC: Validating assay readout stability
 result = fc.check(
@@ -87,26 +88,37 @@ export default function App() {
       
       setUploadedFiles(prev => [newFile, ...prev]);
       
-      setTimeout(() => {
-        setUploadedFiles(prev => prev.map(f => f.name === newFile.name ? { ...f, status: 'Ingested & Vectorized' } : f));
-        setDaemonLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: `[Ingestion] Processed file: ${newFile.name}. Knowledge graph updated.` }, ...prev]);
-        
-        // Boost a target score if it's an upload
-        setTargets(prev => {
-          const newTargets = [...prev];
-          if (newTargets.length > 0) {
-            const updatedTarget = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + 0.02) };
-            newTargets[0] = updatedTarget;
-            
-            fetch(`/api/targets/${updatedTarget.id}`, {
-               method: 'PATCH',
-               headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ score: updatedTarget.score })
-            }).catch(console.error);
-          }
-          return newTargets;
-        });
-      }, 3000);
+      const doIngest = async () => {
+         try {
+           const res = await fetch('/api/ingest', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ fileName: file.name, target: targets[0]?.symbol || 'UNKNOWN' })
+           });
+           const data = await res.json();
+           
+           setUploadedFiles(prev => prev.map(f => f.name === newFile.name ? { ...f, status: 'Ingested & Vectorized' } : f));
+           setDaemonLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: `[Ingestion] ${data.message || 'Complete'}` }, ...prev]);
+           
+           if (targets.length > 0 && data.scoreBoost) {
+              setTargets(prev => {
+                const newTargets = [...prev];
+                const updatedTarget = { ...newTargets[0], score: Math.min(1.0, newTargets[0].score + data.scoreBoost) };
+                newTargets[0] = updatedTarget;
+                fetch(`/api/targets/${updatedTarget.id}`, {
+                   method: 'PATCH',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({ score: updatedTarget.score })
+                }).catch(console.error);
+                return newTargets;
+              });
+           }
+         } catch (e) {
+           setUploadedFiles(prev => prev.map(f => f.name === newFile.name ? { ...f, status: 'Ingestion Failed' } : f));
+         }
+      };
+      
+      doIngest();
     }
   };
 
@@ -170,7 +182,7 @@ export default function App() {
           'Content-Type': 'application/json',
           // Optionally provide the secret key if configured, here omitting for demo mode compatibility
         },
-        body: JSON.stringify({ intent, knowledgeBase: `Target: ${selectedTarget.symbol}, Area: ${selectedTarget.area}`, attempt: currentAttempt })
+        body: JSON.stringify({ intent, knowledgeBase: `Target: ${selectedTarget.symbol}, Area: ${selectedTarget.area}`, targetSymbol: selectedTarget.symbol, attempt: currentAttempt })
       });
       const data = await res.json();
       if (data.success && data.hypothesis) {
@@ -264,12 +276,20 @@ export default function App() {
         };
 
         // SYSTEM 6: Bayesian Updater
-        const prior = (hypothesis?.confidence || 50) / 100;
-        const pD_H = isSuccess ? 0.85 : 0.15; // Prob data given hypothesis true
-        const pD_notH = isSuccess ? 0.20 : 0.80; // Prob data given hypothesis false
-        const pD = (pD_H * prior) + (pD_notH * (1 - prior));
-        const posterior = (pD_H * prior) / pD;
-        const newConfidence = Math.round(posterior * 100);
+        let pD_H = undefined;
+        let pD_notH = undefined;
+        try {
+           const bayesRes = await fetch(`/api/bayes/evidence?target=${selectedTarget.symbol}`);
+           const bayesData = await bayesRes.json();
+           if (bayesData.pD_H) pD_H = bayesData.pD_H;
+           if (bayesData.pD_notH) pD_notH = bayesData.pD_notH;
+           if (!isSuccess) {
+              pD_H = 1 - pD_H;
+              pD_notH = 1 - pD_notH;
+           }
+        } catch (e) { console.warn('Bayes evidence fetch failed'); }
+
+        const newConfidence = calculatePosterior(selectedTarget.score * 100, isSuccess, pD_H, pD_notH);
 
         const scoreDelta = isSuccess ? 0.05 : -0.05;
         const newScore = Math.min(1, Math.max(0, selectedTarget.score + scoreDelta));
@@ -772,6 +792,115 @@ export default function App() {
     </div>
   );
 
+  const [isRunningRetrospectives, setIsRunningRetrospectives] = useState(false);
+  const [retrospectiveResults, setRetrospectiveResults] = useState<{name: string, status: 'success' | 'failure', prediction: string, confidence: number}[]>([]);
+
+  const runRetrospectives = async () => {
+    setIsRunningRetrospectives(true);
+    setRetrospectiveResults([]);
+    try {
+      const res = await fetch('/api/retrospective');
+      const data = await res.json();
+      if (data.results) {
+         setRetrospectiveResults(data.results);
+      }
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setIsRunningRetrospectives(false);
+    }
+  };
+
+  const renderBenchmarks = () => (
+    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col items-center">
+      <div className="max-w-4xl w-full">
+        <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-6">
+           <LineChart size={24} className="text-pink-400"/>
+           Retrospective Benchmarks
+        </h2>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6">
+           <p className="text-zinc-400 mb-6">Evaluating CureForge's target prioritization against historical clinical successes and failures. This grounds the pipeline's Bayesian framework in real-world outcomes.</p>
+           
+           <div className="space-y-4">
+              {retrospectiveResults.length === 0 && !isRunningRetrospectives && (
+                  <div className="text-center text-zinc-500 italic py-4">Run the suite to view current model performance against historical data.</div>
+              )}
+              {isRunningRetrospectives && (
+                  <div className="text-center text-pink-400 animate-pulse py-4 font-mono text-sm">Evaluating historical compounds...</div>
+              )}
+              {retrospectiveResults.map((result, i) => (
+                  <div key={i} className="p-4 border border-zinc-800 bg-black/40 rounded flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                     <div className="flex flex-col gap-1 w-full md:w-2/3">
+                        <span className={`font-bold ${result.status === 'success' ? 'text-emerald-400' : 'text-red-500'}`}>
+                           {result.status === 'success' ? 'SUCCESS' : 'FAILURE'}: {result.name}
+                        </span>
+                        <span className="text-sm text-zinc-500">Pipeline Prediction: {result.prediction}</span>
+                     </div>
+                     <div className="text-left md:text-right w-full md:w-1/3">
+                        <div className="text-lg font-mono text-zinc-200">
+                           {result.status === 'success' ? 'AUC' : 'Alerts'}: {(result.confidence * 100).toFixed(0)}{result.status === 'success' ? '%' : ''}
+                        </div>
+                     </div>
+                  </div>
+              ))}
+           </div>
+           
+           <button onClick={runRetrospectives} disabled={isRunningRetrospectives} className="mt-8 px-4 py-2 bg-pink-500/10 text-pink-400 hover:bg-pink-500/20 disabled:bg-zinc-800 disabled:text-zinc-500 border border-pink-500/30 rounded text-sm transition-colors flex items-center gap-2">
+             <Play size={16} /> {isRunningRetrospectives ? 'Running...' : 'Run Full Retrospective Suite'}
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const [reviewedTargets, setReviewedTargets] = useState<string[]>([]);
+  
+  const handleReviewAction = (id: string, action: 'approve' | 'reject') => {
+      setReviewedTargets(prev => [...prev, id]);
+      setDaemonLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), type: 'system', message: `[Human Review] Target ${id} was ${action}d.` }, ...prev]);
+  };
+
+  const renderReview = () => {
+    const pendingTargets = targets.filter(t => t.score > 0.85 && !reviewedTargets.includes(t.id));
+    return (
+    <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col items-center">
+      <div className="max-w-4xl w-full">
+        <h2 className="text-2xl font-bold flex items-center gap-3 text-white mb-6">
+           <CheckCircle size={24} className="text-blue-500"/>
+           Human Review Queue
+        </h2>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6">
+           <p className="text-zinc-400 mb-6">Biologists, Chemists, and Translational Leads can review high-confidence targets and hypothesis generation results here before advancing them.</p>
+
+           <div className="space-y-4">
+              {pendingTargets.map(t => (
+                <div key={t.id} className="p-4 border border-zinc-800 bg-black/40 rounded flex flex-col gap-4">
+                   <div className="flex justify-between items-start">
+                     <div>
+                       <div className="font-bold text-blue-400 text-lg">{t.symbol}</div>
+                       <div className="text-sm text-zinc-500">{t.disease} ({t.area})</div>
+                     </div>
+                     <div className="text-right font-mono text-sm">
+                       <div>Confidence: <span className="text-white">{(t.score * 100).toFixed(0)}%</span></div>
+                     </div>
+                   </div>
+                   
+                   <div className="flex gap-2 justify-end mt-2">
+                     <button onClick={() => handleReviewAction(t.id, 'reject')} className="px-3 py-1.5 bg-zinc-800 hover:bg-red-500/20 text-zinc-300 hover:text-red-400 rounded text-xs transition-colors">Reject (Insufficient Evidence)</button>
+                     <button onClick={() => handleReviewAction(t.id, 'approve')} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs transition-colors">Approve & Advance</button>
+                   </div>
+                </div>
+              ))}
+              {pendingTargets.length === 0 && (
+                <div className="text-center text-zinc-500 py-8 italic">No high-confidence targets pending review.</div>
+              )}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+  };
+
   const renderDaemon = () => (
     <div className="p-6 overflow-y-auto w-full h-full bg-zinc-950 flex flex-col gap-8">
       <div className="max-w-6xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -917,10 +1046,24 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setActiveNav('informatics')}
-                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors \${activeNav === 'informatics' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors ${activeNav === 'informatics' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
               >
                  <ShieldCheck size={18} className={activeNav === 'informatics' ? 'text-emerald-500' : ''} />
                  Informatics & Audit
+              </button>
+              <button 
+                onClick={() => setActiveNav('benchmarks')}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors ${activeNav === 'benchmarks' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
+              >
+                 <LineChart size={18} className={activeNav === 'benchmarks' ? 'text-pink-400' : ''} />
+                 Retrospective Benchmarks
+              </button>
+              <button 
+                onClick={() => setActiveNav('review')}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded text-sm transition-colors ${activeNav === 'review' ? 'bg-zinc-800/80 text-white font-semibold' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/40'}`}
+              >
+                 <CheckCircle size={18} className={activeNav === 'review' ? 'text-blue-500' : ''} />
+                 Human Review Queue
               </button>
               <button 
                 onClick={() => setActiveNav('daemon')}
@@ -949,6 +1092,8 @@ export default function App() {
            {activeNav === 'discovery' && renderDiscovery()}
            {activeNav === 'lab' && renderLab()}
            {activeNav === 'informatics' && renderInformatics()}
+           {activeNav === 'benchmarks' && renderBenchmarks()}
+           {activeNav === 'review' && renderReview()}
            {activeNav === 'daemon' && renderDaemon()}
            {activeNav === 'visualize' && (
               <div className="w-full h-full relative p-2">
