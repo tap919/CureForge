@@ -2,10 +2,16 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let currentDir = '';
+if (typeof __dirname !== 'undefined') {
+  currentDir = __dirname;
+} else if (typeof import.meta !== 'undefined' && import.meta.url) {
+  currentDir = path.dirname(fileURLToPath(import.meta.url));
+} else {
+  currentDir = process.cwd();
+}
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'cureforge.db');
+const dbPath = process.env.DB_PATH || path.join(currentDir, '..', 'cureforge.db');
 const db = new Database(dbPath);
 
 // Initialize schema

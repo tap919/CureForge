@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Target as TargetType, Hypothesis, AuditRecord, DaemonLog, UploadedFile, CredibilityEvent, MonteCarloData } from './types';
 import { Play, Download, Upload, CheckCircle, FileCode, Check, Activity, Library, Layers, Sparkles, Microscope, Beaker, ShieldCheck, Database, FileSignature, Dna, Hexagon, AlertTriangle, Scale, LineChart, Cpu, Bot, Brain, MoonStar, Zap, FileText, Target } from 'lucide-react';
 import { Visualizer } from './Visualizer';
-import { calculatePosterior } from './lib/bayes';
 
 const API_KEY = import.meta.env.VITE_API_SECRET_KEY || '';
 const apiFetch = (url: string, options: RequestInit = {}) =>
